@@ -146,11 +146,17 @@ function folderEnabled(st) {
   return true;
 }
 // Live activity, written by the plugin's activity hook: thinking / working on X / waiting / idle (your turn).
+// decision trace: which files were edited while the AI worked on which item (written by the activity hook)
+function readTrace(st) {
+  if (!st?.session) return null;
+  try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'trace', `${String(st.session).replace(/[^\w-]/g, '_')}.json`), 'utf8')); } catch { return null; }
+}
+const fileList = files => Object.entries(files || {}).sort((a, b) => b[1] - a[1]).map(([f, c]) => path.basename(f) + (c > 1 ? ` ×${c}` : ''));
 function readActivity(st) {
   if (!st?.session) return null;
   try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'activity', `${String(st.session).replace(/[^\w-]/g, '_')}.json`), 'utf8')); } catch { return null; }
 }
-const poll = now => { load(pickFile(), now); if (model.state?.session) model.state.enabled = folderEnabled(model.state); model.act = readActivity(model.state); };
+const poll = now => { load(pickFile(), now); if (model.state?.session) model.state.enabled = folderEnabled(model.state); model.act = readActivity(model.state); model.trace = readTrace(model.state); };
 
 // ---------- screen: text overlay on top of a braille pixel canvas ----------
 class Screen {
@@ -238,6 +244,7 @@ const HELP = [ // what each status means for you and Claude, not how it is drawn
   ['○', C.assumed, 'assumed', "Claude's own interpretation, not confirmed by you. Agree it, or correct Claude."],
   ['◉', C.goal, 'goal', 'What the work is for. ◌ means no goal is agreed yet.'],
   ['?', C.open, 'ask first', 'A question to settle before anything gets built. Answer it (n, then a), or press G to let the AI go with its recommendations.'],
+  ['⌁', KIND.edit, 'files', 'Files the AI changed for a decision (shown under the selected item). △ unconfirmed: work on an item you haven\'t agreed. ✕ drift: work on something you rejected. ⌁ unlinked: edits not tied to any item.'],
   ['', C.dim, 'why', 'The problem the work solves. Until the goal and the why are agreed, the AI asks before it builds.'],
   ['✕', C.rejected, 'rejected', "You said no. Claude won't act on it or propose it again."],
   ['●', C.spark, 'bright', 'New or just changed.'],
@@ -321,6 +328,13 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   const asks = alive.filter(n => n.ask);
   const needs = [...asks, ...alive.filter(n => !n.ask && (n.status === 'assumed' || n.status === 'open'))];
   model.needs = needs.map(n => n.id); model.asks = asks.length;
+  // trace: edits on a rejected item (drift), on unconfirmed items, or on no item at all
+  const tItems = model.trace?.items || {}, edited = id => Object.keys(tItems[id]?.files || {}).length;
+  const drift = alive.filter(n => n.status === 'rejected' && edited(n.id)).length;
+  const unconf = alive.filter(n => (n.status === 'open' || n.status === 'assumed') && edited(n.id)).length;
+  const unlinked = edited('_unlinked');
+  model.unlinked = unlinked;
+  if (st && (drift || unconf || unlinked)) parts.unshift(drift ? [`✕ ${drift}${named ? ' drift' : ''}`, C.rejected] : unconf ? [`△ ${unconf}${named ? ' unconfirmed' : ''}`, mix(C.open, C.dim, 0.2)] : [`⌁ ${unlinked}${named ? ' unlinked' : ''}`, C.dim]);
   if (st && asks.length) parts.unshift([`? ${asks.length}${named ? ' ask first' : ''}`, mix(C.open, C.goal, 0.4 + 0.4 * Math.sin(t * 4))]);
   if (st) parts.unshift(needs.length
     ? [`⚑ ${needs.length}${named ? ' need you' : ''}`, mix(C.open, C.goal, 0.25 + 0.25 * Math.sin(t * 3))]
@@ -356,7 +370,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
     const spin = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'[Math.floor(t * 10) % 10], pulse = 0.5 + 0.5 * Math.sin(t * 3);
     const who = act.agent || 'Claude', waitText = /^(Claude|Codex)\b/.test(act.label || '') ? act.label : `${who} ${act.label}`;
     const [icon, col, text] = waitingP ? ['⚠', mix(C.open, C.goal, 0.3 * pulse), waitText]
-      : busy ? [spin, mix(kcol, C.goal, 0.2), `${who} · ${act.label}`]
+      : busy ? [spin, mix(kcol, C.goal, 0.2), `${who} · ${act.label}${act.item && model.nodes.get(act.item) ? ` → ${model.nodes.get(act.item).text}` : ''}`]
       : act.state === 'idle' ? ['◉', mix(C.agreed, C.goal, 0.3 * pulse), model.needs.length ? `your turn · ⚑ ${model.needs.length} need you, press enter` : 'your turn']
       : ['·', C.dim, act.state === 'ended' ? 'session ended' : 'idle'];
     S.text(1, y, icon, tone(col), true); S.text(3, y, truncate(text, W - 5), tone(col), busy || waitingP || act.state === 'idle'); y++;
@@ -429,7 +443,10 @@ function frame(now, W, H, color = true, rowPrefix = null) {
     let used = 0; const out = [];
     for (let i = start; i < items.length; i++) {
       const n = items[i], textLines = wrap(n.text, tw);
-      const lines = textLines.concat(...n.notes.map(nt => wrap('↳ ' + nt.text, tw)));
+      const files = model.trace?.items?.[n.id]?.files, showFiles = files && (n.id === model.sel || n.id === model.state?.working?.id || n.status === 'rejected');
+      const noteLines = [].concat(...n.notes.map(nt => wrap('↳ ' + nt.text, tw)));
+      const lines = textLines.concat(noteLines, showFiles ? wrap('⌁ ' + fileList(files).join(' · '), tw) : []);
+      n.fileFrom = showFiles ? textLines.length + noteLines.length : null;
       n.textLines = textLines.length;
       const gap = used ? 1 : 0;
       if (used + gap + lines.length > rowsAvail) { if (!out.length) out.push({n, lines: lines.slice(0, rowsAvail), row: 0}); break; }
@@ -601,12 +618,14 @@ function frame(now, W, H, color = true, rowPrefix = null) {
     const pcol = rec ? mix(C[n.status], C.goal, 0.45 + 0.4 * (0.5 + 0.5 * Math.sin(t * (da < FRESH_MS ? 6 : 2.5)))) : null;
     let budget = da < 700 ? Math.floor(n.lines.reduce((a, l) => a + [...l].length, 0) * da / 700) : Infinity;
     n.lines.forEach((l, i) => {
-      const isNote = i >= (n.textLines || n.lines.length), cp = [...l], shown = budget === Infinity ? l : cp.slice(0, Math.max(0, budget)).join('');
+      const isNote = i >= (n.textLines || n.lines.length), isFile = n.fileFrom != null && i >= n.fileFrom, cp = [...l], shown = budget === Infinity ? l : cp.slice(0, Math.max(0, budget)).join('');
       budget -= cp.length;
-      S.text(side === 'left' ? 1 : c + 2, r + i, shown, isNote ? ncol : sel ? tcol : pcol ? tone(pcol) : tcol, !isNote && (f || sel || rec || n.rank === 0));
+      S.text(side === 'left' ? 1 : c + 2, r + i, shown, isFile ? tone(mix(KIND.edit, C.dim, 0.45)) : isNote ? ncol : sel ? tcol : pcol ? tone(pcol) : tcol, !isNote && (f || sel || rec || n.rank === 0));
       if (side === 'right') S.text(c + 1, r + i, ' ', null);
     });
-    if (n.ask && !rec) { const tag = '?', tx = c - 2; if (tx >= 0) S.text(tx, r, tag, tone(mix(C.open, C.goal, 0.3 + 0.3 * Math.sin(t * 3 + n.seed * 6))), true); }
+    const working = n.id === model.state?.working?.id && busy;
+    if (working && !rec) { const tag = '⌁', tx = c - 2; if (tx >= 0) S.text(tx, r, tag, tone(mix(kcol, C.goal, 0.3 + 0.3 * Math.sin(t * 5))), true); }
+    else if (n.ask && !rec) { const tag = '?', tx = c - 2; if (tx >= 0) S.text(tx, r, tag, tone(mix(C.open, C.goal, 0.3 + 0.3 * Math.sin(t * 3 + n.seed * 6))), true); }
     if (rec) { // "new ✦" / "changed ✦" just left of the node, so it never mixes with the item's text
       const tag = n.changed > (n.arrived ?? -1e12) ? 'changed ✦' : 'new ✦', tx = c - 2 - [...tag].length;
       if (tx >= 0) S.text(tx, r, tag, tone(mix(C.spark, C.goal, 0.5 + 0.5 * Math.sin(t * 4))), true);

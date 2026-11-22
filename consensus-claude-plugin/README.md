@@ -27,6 +27,10 @@ Or inside Claude Code: `/plugin marketplace add /absolute/path/to/consensus-skil
 
 While the goal, the why (`why -`, the problem the work solves) or questions marked `--first` are unsettled, every prompt carries a CLARIFY FIRST note: before building on a vague request, ask the 1-3 questions that matter most, each with a recommendation, and record them with `add open --first`. Clear or small tasks need no questions. `go` (the user's "go", or `G` in the viewer) clears the ask-first marks and lets the AI proceed on its recommendations, saved as assumed. It never blocks a tool call.
 
+## Decision trace
+
+`work <id>` tells the plugin which item the AI is carrying out; the activity hook then records each file edit (Edit, MultiEdit, Write, NotebookEdit, Codex apply_patch) under that item in `~/.consensus-harness/trace/<session>.json`, or under `_unlinked` when no item is set. The viewer shows the files per item and flags drift (edits on rejected items), unconfirmed work (open/assumed) and unlinked edits. Only file paths are recorded, never contents.
+
 ## Codex
 
 Codex (0.171+) reads this plugin as it is: it understands `.claude-plugin/`, `hooks/hooks.json` and `${CLAUDE_PLUGIN_ROOT}`. The consensus, memory, viewer and activity are shared: the viewer shows a Codex session like a Claude one, with "Codex" in the activity line.

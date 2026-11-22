@@ -57,6 +57,33 @@ else if (event === 'Notification') next = {state: 'waiting', label: short(input.
 else if (event === 'Stop') next = {state: 'idle', label: 'your turn', steps: prev.steps || 0};
 else if (event === 'SessionEnd') next = {state: 'ended', label: 'session ended', steps: prev.steps || 0};
 if (!next) process.exit(0);
+
+// Decision trace: file edits are linked to the item the AI said it is working on ("work <id>"),
+// so the viewer can show which files each decision touched and flag edits that rest on no agreed item.
+const editPaths = () => {
+  const ti = input.tool_input || {}, out = [];
+  for (const k of ['file_path', 'notebook_path', 'path']) if (typeof ti[k] === 'string') out.push(ti[k]);
+  // Codex apply_patch: "*** Update File: path" lines anywhere in the input
+  for (const v of Object.values(ti)) if (typeof v === 'string') for (const m of v.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)) out.push(m[1].trim());
+  return [...new Set(out)];
+};
+if (event === 'PreToolUse' && (next.kind === 'edit' || /patch/i.test(String(input.tool_name || '')))) {
+  try {
+    const st = load(project, session), w = st.working && st.items.find(x => x.id === st.working.id);
+    const tfile = path.join(getPaths(project).root, 'trace', `${session.replace(/[^\w-]/g, '_')}.json`);
+    let tr = {}; try { tr = JSON.parse(fs.readFileSync(tfile, 'utf8')); } catch {}
+    tr.items = tr.items || {};
+    const key = w ? w.id : '_unlinked';
+    for (const p of editPaths()) {
+      const rel = path.isAbsolute(p) && p.startsWith(project + path.sep) ? path.relative(project, p) : p;
+      const e = (tr.items[key] = tr.items[key] || {files: {}});
+      e.files[rel] = (e.files[rel] || 0) + 1; e.last = Date.now(); e.status = w ? w.status : 'none';
+    }
+    fs.mkdirSync(path.dirname(tfile), {recursive: true, mode: 0o700});
+    fs.writeFileSync(`${tfile}.${process.pid}.tmp`, JSON.stringify(tr) + '\n', {mode: 0o600}); fs.renameSync(`${tfile}.${process.pid}.tmp`, tfile);
+    if (w) next.item = w.id;
+  } catch {}
+}
 try {
   fs.mkdirSync(path.dirname(file), {recursive: true, mode: 0o700});
   const tmp = `${file}.${process.pid}.tmp`;
