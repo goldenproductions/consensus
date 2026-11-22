@@ -2,14 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {load, resolveProject, isSharedDir, pruneSessions, getPaths} from './state.mjs';
+import {archive, migrateFolderState, renderMemory} from './memory.mjs';
 const chunks=[];
 for await (const chunk of process.stdin) chunks.push(chunk);
 let input={};
 try { input=JSON.parse(Buffer.concat(chunks).toString('utf8')||'{}'); } catch {process.exit(0)}
 const event=input.hook_event_name || 'UserPromptSubmit';
 const project=resolveProject(input.cwd || process.cwd());
-// In the home folder each session gets its own consensus; elsewhere the folder (git root) owns it.
-const session=isSharedDir(project) && input.session_id ? String(input.session_id) : '';
+// Every session has its own working consensus; the project keeps a compacted long-term memory of past sessions.
+const session=input.session_id ? String(input.session_id) : '';
 let state;
 try {
   const folder=load(project);
@@ -17,6 +18,11 @@ try {
   state=session?load(project,session):folder;
 } catch {process.exit(0)}
 if(session && event==='SessionStart') pruneSessions();
+// Keep this session's memory episode current (on every prompt and at the end), so nothing has to be saved by hand.
+if(session){ try{ archive(project,session,state); }catch{} }
+if(event==='SessionEnd') process.exit(0);
+let memory='';
+if(event==='SessionStart'){ try{ migrateFolderState(project); memory=renderMemory(project,session); }catch{} }
 
 // Agreed first, then open, then assumed (stable within each); cap the list and say what was left out.
 const MAX_ITEMS=15;
@@ -35,12 +41,12 @@ const brief=shown.map(x=>`- ${x.status.toUpperCase()}${x.by==='user'?' (set by t
 // Pin the project explicitly so the CLI hits the same state file even if the shell has cd'd elsewhere.
 const cli=`CONSENSUS_PROJECT="${project}"${session?` CONSENSUS_SESSION="${session}"`:''} node "${process.env.CLAUDE_PLUGIN_ROOT || ''}/scripts/state.mjs"`;
 const usage=`State manager, run via Bash as: ${cli} <command>
-Commands: goal - | add <agreed|assumed|open> - | edit <id> <agreed|assumed|open|rejected> - | remove <id> | status-json (full state). <id> is the short id in brackets above or the full id.
+Commands: goal - | gist - | add <agreed|assumed|open> - | edit <id> <agreed|assumed|open|rejected> - | remove <id> | status-json (full state). <id> is the short id in brackets above or the full id.
 "-" reads the text from stdin. Always pass text through a quoted heredoc so the shell never expands the user's words, e.g.:
 ${cli} add agreed - <<'EOF'
 <text>
 EOF`;
-const scope=session?' (scoped to this session: started in the home folder, not a project)':'';
+const scope=session?(isSharedDir(project)?' (this session; started in the home folder)':' (this session)'):'';
 const current=`Current goal${scope}: ${state.goal || '(not yet agreed)'}\n${brief || 'No consensus recorded yet.'}`;
 
 const guidance=`Consensus Harness is enabled for this project. Conversational working agreement:
@@ -57,6 +63,7 @@ const guidance=`Consensus Harness is enabled for this project. Conversational wo
 - REJECTED items: the user said no. Do not act on them or propose them again; if you need something in their place, propose an alternative. A user note under it usually says why.
 - "user note" lines under an item are the user's follow-ups or constraints, often a partial agreement: respect them, adjust the item or your plan, and answer any question in them. Keep the item's status unless the user changed it.
 - Items marked "set by the user in the viewer" were changed by the user directly in the Consensus viewer. They are the user's explicit decision: do not revert them, do not ask about them again, act on them.
+- Keep a gist: 1-3 lines on the overall consensus (the direction, not details), set with "gist -". Update it when the direction changes, not every turn. It is what future sessions in this project will remember; saving is automatic.
 - The user may disable this harness; do not override this.
 - Before using the unslop skill, load the consensus skill: it says how to reuse and record the UI direction.`;
 
@@ -80,6 +87,6 @@ if(sid){
 
 // Full guidance once per session start (also fires after /clear and compaction); per prompt only the live state.
 const context = event==='SessionStart'
-  ? `${guidance}\n${current}${notice}\n${usage}`
+  ? `${guidance}\n${memory?memory+'\n':''}${current}${notice}\n${usage}`
   : `Consensus Harness (on). Reply short (~120 words max). First line: what you need from the user (or the answer). Other detail only if it matters.\n${current}${notice}\n${usage}`;
 console.log(JSON.stringify({hookSpecificOutput:{hookEventName:event,additionalContext:context}}));
