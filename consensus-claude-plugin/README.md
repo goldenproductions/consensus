@@ -31,6 +31,10 @@ While the goal, the why (`why -`, the problem the work solves) or questions mark
 
 `work <id>` tells the plugin which item the AI is carrying out; the activity hook then records each file edit (Edit, MultiEdit, Write, NotebookEdit, Codex apply_patch) under that item in `~/.consensus-harness/trace/<session>.json`, or under `_unlinked` when no item is set. The viewer shows the files per item and flags drift (edits on rejected items), unconfirmed work (open/assumed) and unlinked edits. Only file paths are recorded, never contents.
 
+## Auto-wake
+
+After each reply, `scripts/watch.mjs` waits in the background for your changes in the Consensus viewer. About 4 seconds after your last change (longer while you're typing a note in the viewer) it hands them to the AI, so you don't have to write in the chat to make it see them. Claude Code runs it as an `asyncRewake` Stop hook (exit code 2 wakes the model); Codex has no such hook, so there the watcher detaches and delivers the message with `codex queue`. It stops quietly when you prompt first (your prompt carries the changes anyway), after an hour, or when auto-wake is off (`W` in the viewer, stored in `~/.consensus-harness/settings.json`). Each wake is one AI turn.
+
 ## Codex
 
 Codex (0.171+) reads this plugin as it is: it understands `.claude-plugin/`, `hooks/hooks.json` and `${CLAUDE_PLUGIN_ROOT}`. The consensus, memory, viewer and activity are shared: the viewer shows a Codex session like a Claude one, with "Codex" in the activity line.

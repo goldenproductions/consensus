@@ -1,5 +1,5 @@
 {
-  "description": "Load the session consensus, guidance and project memory; keep the memory current; report live activity to the Consensus viewer. Works in Claude Code and Codex.",
+  "description": "Load the session consensus, guidance and project memory; keep the memory current; report live activity, and wake the AI when the user changes the consensus in the viewer to the Consensus viewer. Works in Claude Code and Codex.",
   "hooks": {
     "SessionStart": [
       {
@@ -68,6 +68,12 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/activity.mjs\"",
             "timeout": 3
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/watch.mjs\"",
+            "timeout": 3600,
+            "asyncRewake": true
           }
         ]
       }

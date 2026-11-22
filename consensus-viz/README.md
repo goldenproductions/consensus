@@ -36,6 +36,10 @@ Under the goal, a status line shows what Claude is doing in the followed session
 
 On a vague request ("build me a website with images of cars") the AI asks before it builds: the why (the problem it solves) and the 1-3 questions that would most change the result, each with its recommendation. The header shows `? 2 ask first`, those questions carry a `?` beside their node and come first when you press `enter`, and a `why` line under the goal shows the agreed why (or that it isn't agreed yet). Answer with `n` (your answer as a note) and `a`, or in the chat. Press `G` to let the AI go with its own recommendations; they are saved as assumed. Nothing is blocked: it's a nudge, not a lock.
 
+## Auto-wake
+
+Your changes in the viewer reach the AI within seconds when it's your turn (plugin 0.10+): no need to type in the chat. After each action the viewer says when the AI will see it (`in a few seconds`, `when it finishes`, or `with your next message`). While you type a note the wake waits for you. `W` turns auto-wake off and on; the footer shows `wake off` while it's off.
+
 ## Decisions linked to code
 
 Before the AI edits files it says which item the edits carry out (`work <id>`), and from then on the plugin's activity hook records every file it edits under that item (`~/.consensus-harness/trace/<session>.json`; Claude Code's Edit/Write and Codex's apply_patch). The activity line shows it: `Claude · editing index.html → Plain HTML and CSS`, and the item being worked on carries a `⌁`. Select an item to see the files it touched (`⌁ index.html ×3 · style.css`). The header warns when work doesn't rest on an agreed decision: `✕ drift` (edits on something you rejected, files shown under it), `△ unconfirmed` (on an open or assumed item) or `⌁ unlinked` (on no item at all).

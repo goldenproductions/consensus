@@ -65,6 +65,24 @@ function textOf(words){
   if (words.length===1 && words[0]==='-') { try { return fs.readFileSync(0,'utf8').trim(); } catch { return ''; } }
   return words.join(' ').trim();
 }
+// When this session last got the consensus (its last prompt, or the last auto-wake): viewer changes after it are new to the AI.
+export function seenFile(project, session) {
+  return path.join(getPaths(project).root, 'seen', crypto.createHash('sha256').update(`${project}\0${session}`).digest('hex').slice(0, 20) + '.json');
+}
+export function readSeen(project, session) { try { return JSON.parse(fs.readFileSync(seenFile(project, session), 'utf8')).at; } catch { return null; } }
+export function markSeen(project, session, at = Date.now()) {
+  try { const f = seenFile(project, session); fs.mkdirSync(path.dirname(f), {recursive: true, mode: 0o700}); fs.writeFileSync(f, JSON.stringify({at}), {mode: 0o600}); } catch {}
+}
+// One line per viewer change, as the AI is told about it.
+export function eventLine(e) {
+  const id = String(e.id || '').slice(0, 8);
+  if (e.action === 'go') return `- said GO: proceed on your recommended answers${e.text ? ` to: ${e.text}` : ''}; record them as assumed and do not ask these again`;
+  if (e.action === 'why') return `- set the why: ${e.text}`;
+  if (e.action === 'note') return `- note on [${id}] (${e.status}) "${e.text}": ${e.note}`;
+  if (e.action === 'remove') return `- removed [${id}]: ${e.text}`;
+  if (e.action === 'add') return `- added as ${String(e.status).toUpperCase()} [${id}]: ${e.text}`;
+  return `- [${id}] ${e.was ? e.was + ' → ' : ''}${String(e.status).toUpperCase()}: ${e.text}`;
+}
 // Accept a full id or a unique prefix of at least 4 characters (the hook shows the first 8).
 export function findItem(state, ref) {
   if (!ref) return {error: 'Missing item id.'};

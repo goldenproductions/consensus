@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import {load, resolveProject, isSharedDir, pruneSessions, getPaths} from './state.mjs';
+import {load, resolveProject, isSharedDir, pruneSessions, getPaths, readSeen, markSeen, eventLine} from './state.mjs';
 import {archive, migrateFolderState, renderMemory} from './memory.mjs';
 const chunks=[];
 for await (const chunk of process.stdin) chunks.push(chunk);
@@ -83,18 +83,12 @@ const guidance=`Consensus Harness is enabled for this project. Conversational wo
 let notice='';
 const sid=String(input.session_id||'');
 if(sid){
-  const seenFile=path.join(getPaths(project).root,'seen',crypto.createHash('sha256').update(`${project}\0${sid}`).digest('hex').slice(0,20)+'.json');
-  let last=null;
-  try{last=JSON.parse(fs.readFileSync(seenFile,'utf8')).at}catch{}
-  const now=Date.now();
+  const last=readSeen(project,sid);
   if(last!==null){
     const evs=(state.events||[]).filter(e=>e.by==='user'&&e.at>last);
-    if(evs.length){
-      const line=e=>e.action==='go'?`- said GO: proceed on your recommended answers${e.text?` to: ${e.text}`:''}; record them as assumed and do not ask these again`:e.action==='why'?`- set the why: ${e.text}`:e.action==='note'?`- note on [${e.id.slice(0,8)}] (${e.status}) "${e.text}": ${e.note}`:e.action==='remove'?`- removed [${e.id.slice(0,8)}]: ${e.text}`:e.action==='add'?`- added as ${e.status.toUpperCase()} [${e.id.slice(0,8)}]: ${e.text}`:`- [${e.id.slice(0,8)}] ${e.was?e.was+' → ':''}${e.status.toUpperCase()}: ${e.text}`;
-      notice=`\nChanged by the user in the Consensus viewer since your last reply. These are the user's own decisions: acknowledge them briefly if relevant, act on them, and do not ask about them again or revert them:\n${evs.map(line).join('\n')}`;
-    }
+    if(evs.length) notice=`\nChanged by the user in the Consensus viewer since your last reply. These are the user's own decisions: acknowledge them briefly if relevant, act on them, and do not ask about them again or revert them:\n${evs.map(eventLine).join('\n')}`;
   }
-  try{fs.mkdirSync(path.dirname(seenFile),{recursive:true,mode:0o700});fs.writeFileSync(seenFile,JSON.stringify({at:now}),{mode:0o600});}catch{}
+  markSeen(project,sid);
 }
 
 // Full guidance once per session start (also fires after /clear and compaction); per prompt only the live state.

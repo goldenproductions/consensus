@@ -270,7 +270,7 @@ function drawHelp(S, W, H) {
     else { rows.push({kind: 'item', g, col, name, text: ''}); wrap(desc, descW).forEach(l => rows.push({kind: 'item', text: l})); }
   }
   rows.push({kind: 'plain', text: ''});
-  for (const l of wrap('↵ next that needs you · G go: skip the ask-first questions · ↑↓ select, then a agree · d disagree · o open · n note · x x forget it · ←→ topic · pgup/pgdn page · g newest topic · tab next consensus · p pin · m mesh · ? / esc close · q quit', boxW - 4)) rows.push({kind: 'plain', text: l});
+  for (const l of wrap('↵ next that needs you · G go: skip the ask-first questions · W auto-wake on/off · ↑↓ select, then a agree · d disagree · o open · n note · x x forget it · ←→ topic · pgup/pgdn page · g newest topic · tab next consensus · p pin · m mesh · ? / esc close · q quit', boxW - 4)) rows.push({kind: 'plain', text: l});
   const boxH = Math.min(H - 2, rows.length + 3), x0 = Math.max(0, Math.floor((W - boxW) / 2)), y0 = Math.max(0, Math.floor((H - boxH) / 2));
   const border = C.dim, blank = ' '.repeat(Math.max(0, boxW - 2));
   S.text(x0, y0, '╭' + '─'.repeat(boxW - 2) + '╮', border);
@@ -405,7 +405,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
     S.text(1 + [...tag].length, hintRow, truncate(hint, W - 2 - [...tag].length), C.goal, true);
   }
   else S.text(1, hintRow, hint, model.sel ? C.goal : tone(C.dim, 0.7), !!model.sel);
-  const mode = model.input ? 'enter save · esc cancel' : model.segManual ? 'g newest topic' : model.pinned ? 'pinned' : W >= 56 ? 'following newest' : 'follow';
+  const mode = (model.input ? 'enter save · esc cancel' : model.segManual ? 'g newest topic' : model.pinned ? 'pinned' : W >= 56 ? 'following newest' : 'follow') + (!model.input && W >= 72 && !autoWake() ? ' · wake off' : '');
   if (!model.input || W >= 60) S.text(W - mode.length - 1, hintRow, mode, tone(model.input ? C.open : model.pinned ? C.open : C.dim, 0.8));
   S.gy = y; S.gh = Math.max(0, hintRow - y);
   if (S.gh < 3) return S.render(color, rowPrefix);
@@ -681,6 +681,28 @@ function switchTopic(d) {
   model.offset = 0; model.pages = []; model.sel = null;
 }
 function say(text, col) { model.msg = {text, col, until: Date.now() + 3500}; }
+// Auto-wake (plugin 0.10+): the plugin hands viewer changes to the AI a few seconds after you make them.
+const SETTINGS = path.join(ROOT, 'settings.json');
+function autoWake() { try { return JSON.parse(fs.readFileSync(SETTINGS, 'utf8')).autoWake !== false; } catch { return true; } }
+function toggleWake() {
+  let cur = {}; try { cur = JSON.parse(fs.readFileSync(SETTINGS, 'utf8')); } catch {}
+  cur.autoWake = !autoWake();
+  try { fs.mkdirSync(ROOT, {recursive: true}); fs.writeFileSync(SETTINGS, JSON.stringify(cur) + '\n'); } catch {}
+  say(cur.autoWake ? '⚡ auto-wake on: your changes reach the AI within seconds' : 'auto-wake off: your changes reach the AI with your next message', cur.autoWake ? C.agreed : C.dim);
+}
+// When does the AI see a change made now?
+function wakeHint() {
+  const a = model.act, who = a?.agent || 'the AI';
+  if (!autoWake()) return ` · ${who} sees it with your next message`;
+  if (a && (a.state === 'working' || a.state === 'thinking')) return ` · ${who} sees it when it finishes`;
+  return ` · ${who} sees it in a few seconds`;
+}
+// While you type a note the plugin holds the wake back, so it isn't sent half-done.
+function syncTyping() {
+  const st = model.state; if (!st?.session) return;
+  const f = path.join(ROOT, 'typing', String(st.session).replace(/[^\w-]/g, '_'));
+  try { if (model.input) { fs.mkdirSync(path.dirname(f), {recursive: true}); fs.writeFileSync(f, ''); } else fs.rmSync(f, {force: true}); } catch {}
+}
 function move(d) {
   const o = model.order;
   if (!o.length) return;
@@ -699,7 +721,7 @@ function addNote(text) {
   const st = model.state, n = model.sel && model.nodes.get(model.sel);
   if (!st || !n) return;
   if (!fs.existsSync(STATE_CLI)) return say('state script not found: set CONSENSUS_STATE_CLI', C.ghost);
-  try { runState(st, ['note', n.id, '-'], text); say('↳ note added', C.open); }
+  try { runState(st, ['note', n.id, '-'], text); say('↳ note added' + wakeHint(), C.open); }
   catch (e) { say(String(e.stderr || e.message).trim().split('\n')[0] || 'write failed', C.ghost); }
 }
 // Your own item: a decision/constraint (agreed) or a question (open), filed under the topic you're looking at.
@@ -711,7 +733,7 @@ function addItem(text, status) {
   try {
     runState(st, ['add', status, ...(topic ? ['--topic', topic] : []), '-'], text);
     model.selText = text; // select it once it shows up
-    say(`${GLYPH[status]} added as ${status}${topic ? ` in ${topic}` : ''}: Claude sees it with your next message`, C[status]);
+    say(`${GLYPH[status]} added as ${status}${topic ? ` in ${topic}` : ''}${wakeHint()}`, C[status]);
   } catch (e) { say(String(e.stderr || e.message).trim().split('\n')[0] || 'write failed', C.ghost); }
 }
 // G: "go" — let the AI proceed on its recommended answers to the ask-first questions
@@ -721,7 +743,7 @@ function goAhead() {
   if (st.enabled === false) return say('harness is off: nothing changed', C.ghost);
   if (!model.asks) return say('no ask-first questions to skip', C.dim);
   if (!fs.existsSync(STATE_CLI)) return say('state script not found: set CONSENSUS_STATE_CLI', C.ghost);
-  try { runState(st, ['go'], ''); say('▶ go: the AI proceeds on its own recommendations (saved as assumed)', C.agreed); }
+  try { runState(st, ['go'], ''); say('▶ go: the AI proceeds on its own recommendations' + wakeHint(), C.agreed); }
   catch (e) { say(String(e.stderr || e.message).trim().split('\n')[0] || 'write failed', C.ghost); }
 }
 function act(kind) {
@@ -736,7 +758,7 @@ function act(kind) {
   try {
     runState(st, args, n.text);
     if (kind === 'remove') { const o = model.order, i = o.indexOf(n.id); model.sel = o[i + 1] || o[i - 1] || null; }
-    say(kind === 'remove' ? '· forgotten' : `${GLYPH[kind]} marked ${kind}`, kind === 'remove' ? C.ghost : C[kind]);
+    say((kind === 'remove' ? '· forgotten' : `${GLYPH[kind]} marked ${kind}`) + (kind === 'rejected' ? '' : wakeHint()), kind === 'remove' ? C.ghost : C[kind]);
     return true;
   } catch (e) { say(String(e.stderr || e.message).trim().split('\n')[0] || 'write failed', C.ghost); }
 }
@@ -766,6 +788,7 @@ if (process.stdin.isTTY) {
   process.stdin.setRawMode(true);
   process.stdin.resume();
   process.stdin.on('data', d => {
+    setImmediate(syncTyping);
     const k = d.toString();
     const bgm = /\x1b\]11;rgb:([0-9a-f]{2})[0-9a-f]*\/([0-9a-f]{2})[0-9a-f]*\/([0-9a-f]{2})/i.exec(k);
     if (bgm) { if (!opt.bgSet) BG = [1, 2, 3].map(j => parseInt(bgm[j], 16)); return; }
@@ -806,6 +829,7 @@ if (process.stdin.isTTY) {
     else if (k === '\r' || k === '\n') nextNeed();
     else if (model.sel && k === 'd') { if (act('rejected')) model.input = {text: '', label: 'why? (optional): '}; }
     else if (k === 'G') goAhead();
+    else if (k === 'W') toggleWake();
     else if (k === '+' || k === '=') { if (model.state?.enabled === false) say('harness is off: nothing changed', C.ghost); else if (!model.state) say('no consensus to add to yet', C.ghost); else model.input = {mode: 'add', text: '', label: 'your item: '}; }
     else if (model.sel && k === 'n') { if (model.state?.enabled === false) say('harness is off: nothing changed', C.ghost); else model.input = {text: ''}; }
     else if (k === 'm') opt.mesh = !opt.mesh;
