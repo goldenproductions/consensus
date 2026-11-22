@@ -77,7 +77,11 @@ export function findItem(state, ref) {
   return {error: 'Unknown item id. Run status-json'};
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
-  const [command,...args] = process.argv.slice(2);
+  const [command,...rawArgs] = process.argv.slice(2);
+  // --topic <name> may appear anywhere: a short subject (1-2 words) that groups items into segments.
+  const ti = rawArgs.indexOf('--topic');
+  const topicArg = ti < 0 ? undefined : String(rawArgs[ti + 1] || '').trim();
+  const args = ti < 0 ? rawArgs : rawArgs.filter((_, j) => j !== ti && j !== ti + 1);
   const cwd = resolveProject(process.cwd());
   // CONSENSUS_SESSION selects a per-session state (set by the hook in the home folder); on/off always applies to the folder.
   const session = process.env.CONSENSUS_SESSION || '';
@@ -90,8 +94,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   if (command==='on' || command==='off') {folder.enabled=command==='on'; save(folder,cwd); console.log(`Consensus Harness ${command.toUpperCase()} for ${cwd}`);}
   else if (command==='status' || !command){console.log(summary({...state,enabled:on}));}
   else if (command==='goal') {if(!on) fail('Harness is off.'); const text=textOf(args);if(!text)fail('Usage: goal <text|->');state.goal=text;save(state,cwd,session);console.log('Goal updated.');}
-  else if (command==='add') {if(!on)fail('Harness is off.');const [status,...words]=args;const text=textOf(words);if(!['agreed','assumed','open','rejected'].includes(status)||!text)fail('Usage: add <agreed|assumed|open|rejected> <text|->');if(state.items.some(x=>x.text.toLowerCase()===text.toLowerCase()))fail('Duplicate item');const now=Date.now(),id=crypto.randomUUID();state.items.push({id,status,text,at:now,updated:now,by});log({action:'add',id,status,text});save(state,cwd,session);console.log('Item added.');}
-  else if (command==='edit') {if(!on)fail('Harness is off.');const [id,status,...words]=args;const text=textOf(words);if(!id||!['agreed','assumed','open','rejected'].includes(status)||!text)fail('Usage: edit <id> <status> <text|->');const {item,error}=findItem(state,id);if(error)fail(error);const was=item.status;item.status=status;item.text=text;item.updated=Date.now();item.by=by;log({action:'edit',id:item.id,status,was,text});save(state,cwd,session);console.log('Item updated.');}
+  else if (command==='add') {if(!on)fail('Harness is off.');const [status,...words]=args;const text=textOf(words);if(!['agreed','assumed','open','rejected'].includes(status)||!text)fail('Usage: add <agreed|assumed|open|rejected> <text|->');if(state.items.some(x=>x.text.toLowerCase()===text.toLowerCase()))fail('Duplicate item');const now=Date.now(),id=crypto.randomUUID();state.items.push({id,status,text,at:now,updated:now,by,...(topicArg?{topic:topicArg}:{})});log({action:'add',id,status,text});save(state,cwd,session);console.log('Item added.');}
+  else if (command==='edit') {if(!on)fail('Harness is off.');const [id,status,...words]=args;const text=textOf(words);if(!id||!['agreed','assumed','open','rejected'].includes(status)||!text)fail('Usage: edit <id> <status> <text|->');const {item,error}=findItem(state,id);if(error)fail(error);const was=item.status;item.status=status;item.text=text;item.updated=Date.now();item.by=by;if(topicArg!==undefined)item.topic=topicArg;log({action:'edit',id:item.id,status,was,text});save(state,cwd,session);console.log('Item updated.');}
+  else if (command==='topic') {if(!on)fail('Harness is off.');const [id,...words]=args;const text=textOf(words);if(!id||!text)fail('Usage: topic <id> <name|->');const {item,error}=findItem(state,id);if(error)fail(error);item.topic=text;save(state,cwd,session);console.log('Topic set.');}
   else if (command==='gist') {if(!on)fail('Harness is off.');const text=textOf(args);if(!text)fail('Usage: gist <text|->');state.gist=text;save(state,cwd,session);console.log('Gist updated.');}
   else if (command==='note') {if(!on)fail('Harness is off.');const [id,...words]=args;const text=textOf(words);if(!id||!text)fail('Usage: note <id> <text|->');const {item,error}=findItem(state,id);if(error)fail(error);item.notes=[...(item.notes||[]),{at:Date.now(),by,text}];item.updated=Date.now();log({action:'note',id:item.id,status:item.status,text:item.text,note:text});save(state,cwd,session);console.log('Note added.');}
   else if (command==='remove') {if(!on)fail('Harness is off.');const {item,error}=findItem(state,args[0]);if(error)fail(error);state.items=state.items.filter(x=>x!==item);log({action:'remove',id:item.id,status:item.status,text:item.text});save(state,cwd,session);console.log('Item removed.');}

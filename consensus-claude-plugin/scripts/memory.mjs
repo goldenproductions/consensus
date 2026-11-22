@@ -36,7 +36,7 @@ function saveMemory(mem, project) {
 function compact(st, session) {
   const times = st.items.map(x => x.at).filter(Boolean);
   const pick = s => st.items.filter(x => x.status === s);
-  const decision = x => ({status: x.status, text: x.text, notes: (x.notes || []).filter(n => n.by === 'user').map(n => n.text)});
+  const decision = x => ({status: x.status, topic: x.topic || '', text: x.text, notes: (x.notes || []).filter(n => n.by === 'user').map(n => n.text)});
   return {
     session,
     start: times.length ? Math.min(...times) : Date.now(),
@@ -92,7 +92,7 @@ export function renderMemory(project, currentSession = '') {
     let s = `- ${day(e.end)} · ${e.goal || '(no goal agreed)'}`;
     if (e.gist) s += `\n  gist: ${e.gist.replace(/\s*\n\s*/g, ' ')}`;
     if (i < FULL) {
-      for (const d of e.decisions) s += `\n  ${d.status.toUpperCase()}: ${d.text}${d.notes.length ? ` (user note: ${d.notes.join('; ')})` : ''}`;
+      for (const d of e.decisions) s += `\n  ${d.status.toUpperCase()}${d.topic ? ` {${d.topic}}` : ''}: ${d.text}${d.notes.length ? ` (user note: ${d.notes.join('; ')})` : ''}`;
     } else if (!e.gist) {
       const top = e.decisions.filter(d => d.status === 'agreed').slice(0, 2).map(d => d.text);
       if (top.length) s += `\n  agreed: ${top.join(' · ')}`;

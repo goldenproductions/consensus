@@ -36,12 +36,12 @@ const shown=[...binding,...rest.slice(0,Math.max(0,MAX_ITEMS-binding.length))];
 const hidden=ordered.filter(x=>!shown.includes(x));
 const counts=['agreed','rejected','open','assumed'].map(st=>[st,hidden.filter(x=>x.status===st).length]).filter(([,n])=>n).map(([st,n])=>`${n} ${st}`).join(', ');
 const noteLines=x=>(x.notes||[]).map(n=>`\n    ↳ ${n.by==='user'?'user note':'note'}: ${n.text}`).join('');
-const brief=shown.map(x=>`- ${x.status.toUpperCase()}${x.by==='user'?' (set by the user in the viewer)':''} [${x.id.slice(0,8)}]: ${x.text}${noteLines(x)}`).join('\n')
+const brief=shown.map(x=>`- ${x.status.toUpperCase()}${x.by==='user'?' (set by the user in the viewer)':''} {${x.topic||'no topic'}} [${x.id.slice(0,8)}]: ${x.text}${noteLines(x)}`).join('\n')
   +(hidden.length?`\n- +${hidden.length} more not shown (${counts}); run status-json to see them`:'');
 // Pin the project explicitly so the CLI hits the same state file even if the shell has cd'd elsewhere.
 const cli=`CONSENSUS_PROJECT="${project}"${session?` CONSENSUS_SESSION="${session}"`:''} node "${process.env.CLAUDE_PLUGIN_ROOT || ''}/scripts/state.mjs"`;
 const usage=`State manager, run via Bash as: ${cli} <command>
-Commands: goal - | gist - | add <agreed|assumed|open> - | edit <id> <agreed|assumed|open|rejected> - | remove <id> | status-json (full state). <id> is the short id in brackets above or the full id.
+Commands: goal - | gist - | add <agreed|assumed|open> --topic "<Topic>" - | edit <id> <agreed|assumed|open|rejected> - | topic <id> "<Topic>" | remove <id> | status-json (full state). <id> is the short id in brackets above or the full id.
 "-" reads the text from stdin. Always pass text through a quoted heredoc so the shell never expands the user's words, e.g.:
 ${cli} add agreed - <<'EOF'
 <text>
@@ -63,6 +63,7 @@ const guidance=`Consensus Harness is enabled for this project. Conversational wo
 - REJECTED items: the user said no. Do not act on them or propose them again; if you need something in their place, propose an alternative. A user note under it usually says why.
 - "user note" lines under an item are the user's follow-ups or constraints, often a partial agreement: respect them, adjust the item or your plan, and answer any question in them. Keep the item's status unless the user changed it.
 - Items marked "set by the user in the viewer" were changed by the user directly in the Consensus viewer. They are the user's explicit decision: do not revert them, do not ask about them again, act on them.
+- Give every item a short topic (1-2 words, like "Viewer" or "Memory") with --topic; the viewer groups items by it. Reuse the topic names shown in braces; start a new topic when the conversation moves to a new subject. Give items marked {no topic} one with the topic command when you touch them.
 - Keep a gist: 1-3 lines on the overall consensus (the direction, not details), set with "gist -". Update it when the direction changes, not every turn. It is what future sessions in this project will remember; saving is automatic.
 - The user may disable this harness; do not override this.
 - Before using the unslop skill, load the consensus skill: it says how to reuse and record the UI direction.`;

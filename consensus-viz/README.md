@@ -14,11 +14,15 @@ The header doubles as the legend: `● 5 agreed  ◆ 2 open  ○ 2 assumed`, eac
 
 Every item shows its full text, wrapped beside its node: in wide panes (64+ columns) in a left and a right column with the goal neuron between them, in narrow panes in one column. If a pane is too short for all items, the column ends with "+N more".
 
+## Topics
+
+Claude gives every item a short topic. The viewer groups by it: the left column lists every topic on one line (name plus counts, newest topic on top), and the right column shows the open topic's items in full, wired from the goal through the topic's hub. It follows the newest topic; `←`/`→` open a newer/older topic and `g` goes back to following. Items without a topic are under "General". Narrow panes show only the open topic, with its name and position in a title row.
+
 ## Newest first
 
 Items are ordered by when they were created or last changed, newest at the top (alternating right and left column). The two newest are at full strength and in bold for the newest; older ones fade step by step. When the pane is full, older items move to further pages:
 
-- `→` older page, `←` newer page, `g` back to the newest
+- `pgdn`/`]` older page, `pgup`/`[` newer page (within the open topic)
 - `↓ 8 older` / `↑ 6 newer` at the edges tell you there is more
 - moving the selection with `↑`/`↓` scrolls along
 
@@ -59,7 +63,7 @@ node consensus-viz/brain.mjs --once --size 100x36   # print one frame and exit
 
 Press `?` for an overlay with the four steps below and what each status means for you and Claude (`?` or `esc` closes it).
 
-Keys: `↑↓` select · `a`/`d`/`o`/`n`/`x` act on the selection · `←→` newer/older page · `g` newest · `q` quit · `tab` cycle through all stored consensus states (pins) · `p` toggle pinned/following · `m` toggle the mesh · `?` legend.
+Keys: `↑↓` select · `a`/`d`/`o`/`n`/`x` act on the selection · `←→` topic · `pgup/pgdn` page · `g` newest topic · `q` quit · `tab` cycle through all stored consensus states (pins) · `p` toggle pinned/following · `m` toggle the mesh · `?` legend.
 
 By default it follows the most recently changed state file, so it jumps to whatever Claude session last recorded something. With two sessions active, press `p` to stay on one.
 
