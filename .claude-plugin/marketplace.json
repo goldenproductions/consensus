@@ -11,7 +11,7 @@
       "name": "consensus-harness",
       "source": "./consensus-claude-plugin",
       "description": "Conversation-first shared understanding for Claude Code, without separate model API keys",
-      "version": "0.2.5",
+      "version": "0.2.6",
       "dependencies": [
         "unslop"
       ]
