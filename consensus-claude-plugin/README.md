@@ -72,6 +72,10 @@ A new session in the same project starts with that memory, newest first: the las
 
 The Consensus viewer (`consensus-viz/`) writes through the same state script with `CONSENSUS_BY=user`. Such items carry `by: "user"` and show to Claude as "set by the user in the viewer", and the next prompt in each session lists what the user changed since Claude's last reply, so Claude acts on it instead of asking again or reverting it. Every add/edit/remove is also kept in a short `events` log in the state file (last 30).
 
+## Live activity for the viewer
+
+`scripts/activity.mjs` runs on UserPromptSubmit, PreToolUse, Notification, Stop and SessionEnd and writes the session's current activity (thinking, working on X, waiting, your turn) to `~/.consensus-harness/activity/<session>.json` for the Consensus viewer. It prints nothing, takes a few tens of milliseconds, and records only file names or the tool's own description, never command text. It does nothing while the harness is off.
+
 ## Requirements
 
 Node.js 20+ and a recent Claude Code CLI. No npm install needed.

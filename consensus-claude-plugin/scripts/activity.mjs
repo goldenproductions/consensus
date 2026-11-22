@@ -1,0 +1,52 @@
+// Live activity for the Consensus viewer: what Claude is doing right now in this session.
+// Runs on UserPromptSubmit, PreToolUse, Notification, Stop and SessionEnd. Writes one small file per session
+// (~/.consensus-harness/activity/<session>.json), prints nothing and always exits 0, so it never affects Claude.
+// Labels come from the tool's own user-facing description or a file name, never from command text.
+import fs from 'node:fs';
+import path from 'node:path';
+import {load, resolveProject, getPaths} from './state.mjs';
+
+const chunks = [];
+for await (const chunk of process.stdin) chunks.push(chunk);
+let input = {};
+try { input = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { process.exit(0); }
+const session = String(input.session_id || '');
+if (!session) process.exit(0);
+const project = resolveProject(input.cwd || process.cwd());
+try { if (!load(project).enabled) process.exit(0); } catch { process.exit(0); }
+
+const base = p => (p ? path.basename(String(p)) : '');
+const short = (s, n = 70) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+function describe(tool, ti = {}) {
+  switch (tool) {
+    case 'Read': return `reading ${base(ti.file_path)}`;
+    case 'Edit': case 'MultiEdit': return `editing ${base(ti.file_path)}`;
+    case 'Write': return `writing ${base(ti.file_path)}`;
+    case 'NotebookEdit': return `editing ${base(ti.notebook_path)}`;
+    case 'Bash': return ti.description ? short(ti.description).replace(/^./, c => c.toLowerCase()) : 'running a command';
+    case 'Grep': case 'Glob': return 'searching the code';
+    case 'WebFetch': case 'WebSearch': return 'reading the web';
+    case 'Agent': case 'Task': return ti.description ? `delegating: ${short(ti.description, 50)}` : 'delegating to an agent';
+    case 'TodoWrite': return 'planning';
+    default: return tool ? `using ${String(tool).replace(/^mcp__[^_]+__/, '')}` : 'working';
+  }
+}
+
+const event = input.hook_event_name || '';
+const file = path.join(getPaths(project).root, 'activity', `${session.replace(/[^\w-]/g, '_')}.json`);
+let prev = {};
+try { prev = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+let next = null;
+if (event === 'UserPromptSubmit') next = {state: 'thinking', label: 'thinking', steps: 0};
+else if (event === 'PreToolUse') next = {state: 'working', label: describe(input.tool_name, input.tool_input || {}), steps: (prev.steps || 0) + 1};
+else if (event === 'Notification') next = {state: 'waiting', label: short(input.message || 'needs your attention', 80), steps: prev.steps || 0};
+else if (event === 'Stop') next = {state: 'idle', label: 'your turn', steps: prev.steps || 0};
+else if (event === 'SessionEnd') next = {state: 'ended', label: 'session ended', steps: prev.steps || 0};
+if (!next) process.exit(0);
+try {
+  fs.mkdirSync(path.dirname(file), {recursive: true, mode: 0o700});
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify({session, project, ...next, at: Date.now()}) + '\n', {mode: 0o600});
+  fs.renameSync(tmp, file);
+} catch {}
+process.exit(0);

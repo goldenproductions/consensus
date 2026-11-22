@@ -5,7 +5,7 @@ A live terminal view of the Consensus Harness state, for a pane beside Claude Co
 - the **goal** is the central neuron
 - **agreed** items (● teal) are wired with thick axons and fire steady impulses outward
 - **open** questions (◆ amber) pulse and send signals back to the goal
-- **assumed** items (○ lilac) hang on faint dotted links
+- **assumed** items (○ lilac) hang on faint dotted links and flicker between ○ and ◌ until you confirm them
 - **rejected** items (✕ rose) stay visible on faint dotted links, so the "no" isn't lost
 - new or changed items flash and stay highlighted for a few seconds; removed items fade out in red
 - a dim cortex-shaped mesh sparks in the background; when the harness is off everything greys out
@@ -28,6 +28,14 @@ Items are ordered by when they were created or last changed, newest at the top (
 
 Order comes from the `at`/`updated` timestamps the state script writes (plugin 0.2.6+). Older items without timestamps keep their creation order, below the timestamped ones.
 
+## Live activity
+
+Under the goal, a status line shows what Claude is doing in the followed session: `⠼ Claude · editing brain.mjs`, `⚠ Claude needs your permission…`, or `◉ your turn` (plus how many items need you). While Claude works the brain fires faster; when it waits for permission the goal neuron turns amber. This comes from the plugin's activity hook (plugin 0.6.0+), which writes `~/.consensus-harness/activity/<session>.json` on each prompt, tool call, notification and stop. Labels are file names or the tool's own short description, never command text.
+
+## What needs you
+
+The header shows `⚑ 2 need you`: the assumptions and open questions Claude is waiting on, across all topics (or `✓ all clear`). Press `enter` to jump to the next one, in whatever topic it is, then answer it with `a`, `d` or `n`.
+
 ## Answer Claude from the viewer
 
 Press `↓` to select an item (the first press lands on the first assumption), move with `↑`/`↓` (or `j`/`k`), then:
@@ -38,6 +46,8 @@ Press `↓` to select an item (the first press lands on the first assumption), m
 - `d`: disagree. The item turns ✕ rejected and stays, so Claude knows you said no and won't propose it again. A "why?" prompt follows; type a reason or press `esc`.
 - `x` twice: forget it completely, as if it was never there (for mistakes; to say no, use `d`).
 - `esc`: stop selecting.
+
+The selected item keeps its status colour and breathes; the footer names its status (`○ assumed · a agree …`).
 
 The change is written through the plugin's own state script (`consensus-claude-plugin/scripts/state.mjs`, or `$CONSENSUS_STATE_CLI`), so the same rules apply as when Claude writes. Claude sees it in its context on your next prompt. Nothing is written when the harness is off. While an item is selected the viewer stays on the current consensus instead of following a newer one.
 
@@ -63,7 +73,7 @@ node consensus-viz/brain.mjs --once --size 100x36   # print one frame and exit
 
 Press `?` for an overlay with the four steps below and what each status means for you and Claude (`?` or `esc` closes it).
 
-Keys: `↑↓` select · `a`/`d`/`o`/`n`/`x` act on the selection · `←→` topic · `pgup/pgdn` page · `g` newest topic · `q` quit · `tab` cycle through all stored consensus states (pins) · `p` toggle pinned/following · `m` toggle the mesh · `?` legend.
+Keys: `enter` next item that needs you · `↑↓` select · `a`/`d`/`o`/`n`/`x` act on the selection · `←→` topic · `pgup/pgdn` page · `g` newest topic · `q` quit · `tab` cycle through all stored consensus states (pins) · `p` toggle pinned/following · `m` toggle the mesh · `?` legend.
 
 By default it follows the most recently changed state file, so it jumps to whatever Claude session last recorded something. With two sessions active, press `p` to stay on one.
 

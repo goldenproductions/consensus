@@ -81,7 +81,15 @@ function listStates() {
     for (const n of names) {
       if (!n.endsWith('.json')) continue;
       const file = path.join(dir, n);
-      try { out.push({file, mtime: fs.statSync(file).mtimeMs}); } catch {}
+      try {
+        const st = JSON.parse(fs.readFileSync(file, 'utf8'));
+        // a folder state already imported into long-term memory is history, not a live consensus
+        if (sub === 'projects' && st.migrated) continue;
+        let mtime = fs.statSync(file).mtimeMs;
+        // a session you are talking to counts as recent too (the activity hook writes on every prompt and tool call)
+        if (st.session) { try { mtime = Math.max(mtime, fs.statSync(path.join(ROOT, 'activity', `${String(st.session).replace(/[^\w-]/g, '_')}.json`)).mtimeMs); } catch {} }
+        out.push({file, mtime});
+      } catch {}
     }
   }
   return out.sort((a, b) => b.mtime - a.mtime);
@@ -89,7 +97,7 @@ function listStates() {
 function readJSON(file) { try { const s = JSON.parse(fs.readFileSync(file, 'utf8')); return Array.isArray(s.items) ? s : null; } catch { return null; } }
 
 const model = {file: null, mtime: 0, state: null, nodes: new Map(), goal: '', goalChanged: -1e12, pinned: !!opt.project, first: true,
-  sel: null, order: [], confirmX: 0, msg: null, offset: 0, pages: [], pageCount: 0, input: null, openSeg: null, segManual: false, segNames: []};
+  sel: null, order: [], needs: [], confirmX: 0, msg: null, offset: 0, pages: [], pageCount: 0, input: null, openSeg: null, segManual: false, segNames: []};
 
 function pickFile() {
   const all = listStates();
@@ -114,7 +122,8 @@ function load(pick, now) {
     const text = String(it.text || '');
     let n = model.nodes.get(it.id);
     if (!n) {
-      n = {id: it.id, seed: hash(it.id), a: null, born: model.first ? now + i * 110 : now, changed: -1e12, removed: null, arrived: model.first ? -1e12 : now};
+      // first load: everything at once; only real arrivals animate in
+      n = {id: it.id, seed: hash(it.id), a: null, born: model.first ? now - 1000 : now, changed: -1e12, removed: null, arrived: model.first ? -1e12 : now};
       if (!model.first) model.arrival = now;
       model.nodes.set(it.id, n);
     } else if (n.status !== status || n.text !== text || n.removed !== null || (it.notes || []).length !== (n.notes || []).length) { n.changed = now; model.arrival = now; }
@@ -133,7 +142,12 @@ function folderEnabled(st) {
   }
   return true;
 }
-const poll = now => { load(pickFile(), now); if (model.state?.session) model.state.enabled = folderEnabled(model.state); };
+// Live activity, written by the plugin's activity hook: thinking / working on X / waiting / idle (your turn).
+function readActivity(st) {
+  if (!st?.session) return null;
+  try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'activity', `${String(st.session).replace(/[^\w-]/g, '_')}.json`), 'utf8')); } catch { return null; }
+}
+const poll = now => { load(pickFile(), now); if (model.state?.session) model.state.enabled = folderEnabled(model.state); model.act = readActivity(model.state); };
 
 // ---------- screen: text overlay on top of a braille pixel canvas ----------
 class Screen {
@@ -228,7 +242,7 @@ const HELP = [ // what each status means for you and Claude, not how it is drawn
 // The four things a new user needs, shown first in the ? overlay.
 const HOWTO = [
   'Talk with Claude as usual. Decisions land here, by topic.',
-  "○ is Claude's assumption. ↓ select it: a agree, d disagree, n note.",
+  "○ ◆ wait for you (⚑). ↵ jumps there: a agree, d disagree, n note.",
   '● agreed is what Claude works from. ◆ open is undecided.',
   'Your changes here reach Claude with your next message.',
 ];
@@ -244,7 +258,7 @@ function drawHelp(S, W, H) {
     else { rows.push({kind: 'item', g, col, name, text: ''}); wrap(desc, descW).forEach(l => rows.push({kind: 'item', text: l})); }
   }
   rows.push({kind: 'plain', text: ''});
-  for (const l of wrap('↑↓ select, then a agree · d disagree · o open · n note · x x forget it · ←→ topic · pgup/pgdn page · g newest topic · tab next consensus · p pin · m mesh · ? / esc close · q quit', boxW - 4)) rows.push({kind: 'plain', text: l});
+  for (const l of wrap('↵ next that needs you · ↑↓ select, then a agree · d disagree · o open · n note · x x forget it · ←→ topic · pgup/pgdn page · g newest topic · tab next consensus · p pin · m mesh · ? / esc close · q quit', boxW - 4)) rows.push({kind: 'plain', text: l});
   const boxH = Math.min(H - 2, rows.length + 3), x0 = Math.max(0, Math.floor((W - boxW) / 2)), y0 = Math.max(0, Math.floor((H - boxH) / 2));
   const border = C.dim, blank = ' '.repeat(Math.max(0, boxW - 2));
   S.text(x0, y0, '╭' + '─'.repeat(boxW - 2) + '╮', border);
@@ -268,6 +282,8 @@ function drawHelp(S, W, H) {
 // ---------- one frame ----------
 function frame(now, W, H, color = true, rowPrefix = null) {
   const t = now / 1000, S = new Screen(W, H), st = model.state, off = !!st && st.enabled === false;
+  const act = st && !off ? model.act : null, fresh10 = act && Date.now() - act.at < 600000;
+  const busy = !!(fresh10 && (act.state === 'working' || act.state === 'thinking')), waitingP = !!(fresh10 && act.state === 'waiting');
   const tone = (col, k = 1) => { const c = off ? mix(col, C.off, 0.75) : col; const kk = off ? k * 0.6 : k; return [c[0] * kk, c[1] * kk, c[2] * kk]; };
   const glow = (col, k) => off ? k * 0.6 : k;
 
@@ -294,6 +310,12 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   const named = W >= 60; // legend: wide panes name each colour, narrow ones show only the symbols
   const parts = [[`● ${counts.agreed}${named ? ' agreed' : ''}`, C.agreed], [`◆ ${counts.open}${named ? ' open' : ''}`, C.open], [`○ ${counts.assumed}${named ? ' assumed' : ''}`, C.assumed]];
   if (counts.rejected) parts.push([`✕ ${counts.rejected}${named ? ' rejected' : ''}`, C.rejected]);
+  // needs you: assumptions and open questions waiting for the user's answer, newest first
+  const needs = alive.filter(n => n.status === 'assumed' || n.status === 'open');
+  model.needs = needs.map(n => n.id);
+  if (st) parts.unshift(needs.length
+    ? [`⚑ ${needs.length}${named ? ' need you' : ''}`, mix(C.open, C.goal, 0.25 + 0.25 * Math.sin(t * 3))]
+    : [named ? '✓ all clear' : '✓', mix(C.agreed, C.dim, 0.5)]);
   const rightLen = parts.reduce((a, [s]) => a + [...s].length + 2, 0) + (tail ? [...tail].length + 1 : 0);
   let rx0 = W - rightLen;
   for (const [txt, col] of parts) { S.text(rx0, y, txt, tone(col), true); rx0 += [...txt].length + 2; }
@@ -311,19 +333,35 @@ function frame(now, W, H, color = true, rowPrefix = null) {
     S.text(7, y, i === 1 && wrap(model.goal, W - 8).length > 2 ? truncate(l + ' …', W - 8) : l, model.goal ? tone(goalFresh ? C.spark : C.goal) : tone(C.dim), !!model.goal);
     y++;
   });
+  // what Claude is doing right now (from the plugin's activity hook)
+  if (act && W >= 30) {
+    const spin = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'[Math.floor(t * 10) % 10], pulse = 0.5 + 0.5 * Math.sin(t * 3);
+    const [icon, col, text] = waitingP ? ['⚠', mix(C.open, C.goal, 0.3 * pulse), act.label]
+      : busy ? [spin, C.spark, `Claude · ${act.label}`]
+      : act.state === 'idle' ? ['◉', mix(C.agreed, C.goal, 0.3 * pulse), model.needs.length ? `your turn · ⚑ ${model.needs.length} need you, press enter` : 'your turn']
+      : ['·', C.dim, act.state === 'ended' ? 'session ended' : 'idle'];
+    S.text(1, y, icon, tone(col), true); S.text(3, y, truncate(text, W - 5), tone(col), busy || waitingP || act.state === 'idle'); y++;
+  }
   S.text(0, y++, '─'.repeat(W), tone(C.dim, 0.5));
 
   // footer
   const hintRow = H - 1;
   const hint = model.sel
     ? (W >= 84 ? 'a agree · d disagree · o open · n note · x forget · esc done' : W >= 40 ? 'a · d · o · n · x · esc' : 'esc')
-    : (W >= 72 ? 'q quit · ↑↓ select · ←→ topic · ? help' : W >= 40 ? 'q · ↑↓ · ←→ · ? help' : '? help');
+    : model.needs.length
+      ? (W >= 80 ? '↵ next that needs you · ↑↓ select · ←→ topic · ? help' : W >= 40 ? '↵ next · ↑↓ · ←→ · ? help' : '↵ next')
+      : (W >= 72 ? 'q quit · ↑↓ select · ←→ topic · ? help' : W >= 40 ? 'q · ↑↓ · ←→ · ? help' : '? help');
   if (model.input) {
     const label = model.input.label || 'note: ', room = Math.max(4, W - label.length - 4), txt = [...model.input.text];
     S.text(1, hintRow, label, C.open, true);
     S.text(1 + label.length, hintRow, (txt.length > room ? '…' + txt.slice(-room + 1).join('') : model.input.text) + '▌', C.goal, true);
   }
   else if (model.msg && Date.now() < model.msg.until) S.text(1, hintRow, truncate(model.msg.text, W - 20), model.msg.col, true);
+  else if (model.sel && model.nodes.get(model.sel) && W >= 40) {
+    const st2 = model.nodes.get(model.sel).status, tag = `${GLYPH[st2]} ${st2} · `;
+    S.text(1, hintRow, tag, C[st2], true);
+    S.text(1 + [...tag].length, hintRow, truncate(hint, W - 2 - [...tag].length), C.goal, true);
+  }
   else S.text(1, hintRow, hint, model.sel ? C.goal : tone(C.dim, 0.7), !!model.sel);
   const mode = model.input ? 'enter save · esc cancel' : model.segManual ? 'g newest topic' : model.pinned ? 'pinned' : W >= 56 ? 'following newest' : 'follow';
   if (!model.input || W >= 60) S.text(W - mode.length - 1, hintRow, mode, tone(model.input ? C.open : model.pinned ? C.open : C.dim, 0.8));
@@ -420,7 +458,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
       S.dot(p.x, p.y, tone(C.mesh), glow(0, 0.65 + 0.3 * Math.sin(t * p.sp * 1.7 + p.ph)));
       if (waving) { const b = Math.exp(-((Math.hypot(p.x - cx, p.y - cy) - waveR) ** 2) / (2 * 14 ** 2)); if (b > 0.05) { S.dot(p.x, p.y, C.spark, b); S.dot(p.x + 1, p.y, C.spark, b * 0.7); } }
     }
-    if (now > M.nextSpark && M.links.length && !off) { M.sparks.push({l: M.links[Math.floor(Math.random() * M.links.length)], s: now}); M.nextSpark = now + (waving ? 20 : 150 + Math.random() * 450); }
+    if (now > M.nextSpark && M.links.length && !off) { M.sparks.push({l: M.links[Math.floor(Math.random() * M.links.length)], s: now}); M.nextSpark = now + (waving ? 20 : busy ? 35 : waitingP ? 120 : 400 + Math.random() * 800); }
     M.sparks = M.sparks.filter(sp => now - sp.s < 900);
     for (const sp of M.sparks) {
       const p = M.pts[sp.l[0]], q = M.pts[sp.l[1]], u = (now - sp.s) / 900;
@@ -444,7 +482,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
     S.line(cx, cy, hub[0], hub[1], tone(C.goal), glow(0, 0.6));
     S.line(cx, cy + 1, hub[0], hub[1] + 1, tone(C.goal), glow(0, 0.4));
     for (let rr = 1; rr <= 2; rr++) S.ring(hub[0], hub[1], rr, tone(C.goal), glow(0, 0.7));
-    const p = (t / 1.6) % 1; if (!off) for (let k = 0; k < 4; k++) { const u = p - k * 0.04; if (u >= 0) S.dot(cx + (hub[0] - cx) * u, cy + (hub[1] - cy) * u, C.spark, 0.9 - k * 0.2); }
+    const p = (t / (busy ? 0.6 : 1.6)) % 1; if (!off) for (let k = 0; k < 4; k++) { const u = p - k * 0.04; if (u >= 0) S.dot(cx + (hub[0] - cx) * u, cy + (hub[1] - cy) * u, C.spark, 0.9 - k * 0.2); }
   }
   const placed = alive.filter(n => n.cell && now >= n.born);
   model.order = items.map(n => n.id);
@@ -478,7 +516,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
       S.line(x, yy, x + Math.cos(a) * L, yy + Math.sin(a) * L, tone(col), glow(0, 0.4));
     }
     // travelling impulses: agreed fire outward steadily, open questions send signals back to the goal
-    const period = n.status === 'agreed' ? 2.2 : n.status === 'open' ? 3.4 : 0;
+    const period = (n.status === 'agreed' ? 2.2 : n.status === 'open' ? 3.4 : 0) * (busy ? 0.45 : 1);
     if (period && grow >= 1) {
       const p = (t / period + n.seed) % 1, travel = 0.55;
       if (p < travel) {
@@ -503,7 +541,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   // the goal neuron
   const gk = model.goal ? 1 : 0.4;
   for (let rr = 1; rr <= 3; rr++) S.ring(cx, cy, rr, tone(C.goal), glow(0, 0.75 * gk));
-  S.ring(cx, cy, 5 + Math.sin(t * 1.6) * 0.8, tone(C.goal), glow(0, 0.55 * gk));
+  S.ring(cx, cy, 5 + Math.sin(t * (busy ? 5 : 1.6)) * (busy ? 1.4 : 0.8), tone(waitingP ? C.open : C.goal), glow(0, (busy || waitingP ? 0.8 : 0.55) * gk));
   S.ring(cx, cy, 9 + Math.sin(t * 1.1 + 1) * 1.2, tone(C.goal), glow(0, 0.2 * gk), 2);
   if (goalFresh) { const p = clamp((now - model.goalChanged) / 1800, 0, 1); if (p < 1) S.ring(cx, cy, 6 + 20 * easeOut(p), C.spark, 1 - p); }
   S.text(Math.floor(cx / 2), S.gy + Math.floor(cy / 4), model.goal ? '◉' : '◌', tone(C.goal, gk), true);
@@ -515,10 +553,13 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   }
   for (const n of placed) {
     const {side, c, r} = n.cell, f = fresh(n);
-    const pulse = n.status === 'open' ? 0.65 + 0.35 * Math.sin(t * 3 + n.seed * 6) : 1;
-    S.text(c, r, GLYPH[n.status], tone(f ? mix(C[n.status], C.goal, 0.4) : C[n.status], pulse * Math.max(0.55, focus(n))), true);
-    const sel = n.id === model.sel;
-    const tcol = sel ? C.goal : tone(f ? mix(C[n.status], C.goal, 0.55) : mix(C[n.status], C.text, 0.55), f ? 1 : 0.95 * focus(n));
+    const sel = n.id === model.sel, wave = 0.5 + 0.5 * Math.sin(t * 2.2 + n.seed * 6);
+    const pulse = n.status === 'open' ? 0.65 + 0.35 * Math.sin(t * 3 + n.seed * 6) : n.status === 'assumed' ? 0.55 + 0.45 * wave : 1;
+    // assumptions waver between ○ and ◌: a thought that isn't confirmed yet
+    const glyph = n.status === 'assumed' && !off && wave < 0.3 ? '◌' : GLYPH[n.status];
+    S.text(c, r, glyph, tone(f ? mix(C[n.status], C.goal, 0.4) : C[n.status], pulse * Math.max(0.55, focus(n))), true);
+    // selected: keep the status colour (so an assumption still reads as one) and breathe toward white
+    const tcol = sel ? mix(C[n.status], C.goal, 0.1 + 0.3 * (0.5 + 0.5 * Math.sin(t * 3))) : tone(f ? mix(C[n.status], C.goal, 0.55) : mix(C[n.status], C.text, 0.55), f ? 1 : 0.95 * focus(n));
     const ncol = tone(mix(C.goal, C.dim, 0.35), Math.max(0.6, focus(n)));
     const da = now - attnT(n), rec = recent(n);
     // recent items pulse between their colour and bright white; the first 0.7s the text types itself in
@@ -534,7 +575,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
       const tag = n.changed > (n.arrived ?? -1e12) ? 'changed ✦' : 'new ✦', tx = c - 2 - [...tag].length;
       if (tx >= 0) S.text(tx, r, tag, tone(mix(C.spark, C.goal, 0.5 + 0.5 * Math.sin(t * 4))), true);
     }
-    if (sel) S.text(side === 'left' ? c + 1 : c - 1, r, side === 'left' ? '◂' : '▸', C.goal, true);
+    if (sel) S.text(side === 'left' ? c + 1 : c - 1, r, side === 'left' ? '◂' : '▸', mix(C[n.status], C.goal, 0.3), true);
     if (side === 'left') { // dotted leader from the end of the first line to the node
       const from = (1 + [...n.lines[0]].length) * 2 + 2, py = (r - S.gy) * 4 + 2;
       for (let px = from; px < c * 2 - 1; px += 3) S.dot(px, py, tone(C[n.status]), glow(0, 0.3));
@@ -565,6 +606,17 @@ function frame(now, W, H, color = true, rowPrefix = null) {
 }
 
 // ---------- acting on items: select with arrows, then a / o / x ----------
+// ↵: jump to the next item that waits for the user (assumed or open), in whatever topic it is
+function nextNeed() {
+  const list = model.needs;
+  if (!list.length) return say('✓ nothing waits for you', C.agreed);
+  const i = list.indexOf(model.sel), id = list[(i + 1) % list.length], n = model.nodes.get(id);
+  if (!n) return;
+  const topic = n.topic || 'General';
+  model.openSeg = topic; model.segManual = topic !== model.segNames[0];
+  model.offset = 0; model.pages = []; model.sel = id;
+  say(`⚑ ${list.indexOf(id) + 1} of ${list.length} waiting · a agree · d disagree · n note`, C.open);
+}
 function switchTopic(d) {
   const names = model.segNames;
   if (names.length < 2) return;
@@ -662,6 +714,7 @@ if (process.stdin.isTTY) {
     else if (model.sel && k === 'a') act('agreed');
     else if (model.sel && k === 'o') act('open');
     else if (model.sel && k === 'x') act('remove');
+    else if (k === '\r' || k === '\n') nextNeed();
     else if (model.sel && k === 'd') { if (act('rejected')) model.input = {text: '', label: 'why? (optional): '}; }
     else if (model.sel && k === 'n') { if (model.state?.enabled === false) say('harness is off: nothing changed', C.ghost); else model.input = {text: ''}; }
     else if (k === 'm') opt.mesh = !opt.mesh;
