@@ -23,6 +23,10 @@ claude plugin install consensus-harness@consensus-local
 
 Or inside Claude Code: `/plugin marketplace add /absolute/path/to/consensus-skill`, then `/plugin install consensus-harness@consensus-local`. After changing the plugin, bump `version` in both `plugin.json` and `marketplace.json`, run `claude plugin marketplace update consensus-local`, and start a new session. Remove with `claude plugin uninstall consensus-harness@consensus-local`.
 
+## Ask first (soft clarify gate)
+
+While the goal, the why (`why -`, the problem the work solves) or questions marked `--first` are unsettled, every prompt carries a CLARIFY FIRST note: before building on a vague request, ask the 1-3 questions that matter most, each with a recommendation, and record them with `add open --first`. Clear or small tasks need no questions. `go` (the user's "go", or `G` in the viewer) clears the ask-first marks and lets the AI proceed on its recommendations, saved as assumed. It never blocks a tool call.
+
 ## Codex
 
 Codex (0.171+) reads this plugin as it is: it understands `.claude-plugin/`, `hooks/hooks.json` and `${CLAUDE_PLUGIN_ROOT}`. The consensus, memory, viewer and activity are shared: the viewer shows a Codex session like a Claude one, with "Codex" in the activity line.

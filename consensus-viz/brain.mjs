@@ -130,7 +130,7 @@ function load(pick, now) {
       if (!model.first) model.arrival = now;
       model.nodes.set(it.id, n);
     } else if (n.status !== status || n.text !== text || n.removed !== null || (it.notes || []).length !== (n.notes || []).length) { n.changed = now; model.arrival = now; }
-    Object.assign(n, {status, text, order: i, removed: null, time: Number(it.updated || it.at) || 0, notes: Array.isArray(it.notes) ? it.notes : [], topic: String(it.topic || '').trim()});
+    Object.assign(n, {status, text, order: i, removed: null, time: Number(it.updated || it.at) || 0, notes: Array.isArray(it.notes) ? it.notes : [], topic: String(it.topic || '').trim(), ask: !!it.first && status === 'open'});
   });
   for (const n of model.nodes.values()) if (!seen.has(n.id) && n.removed === null) n.removed = now;
   const goal = String(st.goal || '');
@@ -237,6 +237,8 @@ const HELP = [ // what each status means for you and Claude, not how it is drawn
   ['◆', C.open, 'open', 'Still to be decided. Neither of you should treat it as settled.'],
   ['○', C.assumed, 'assumed', "Claude's own interpretation, not confirmed by you. Agree it, or correct Claude."],
   ['◉', C.goal, 'goal', 'What the work is for. ◌ means no goal is agreed yet.'],
+  ['?', C.open, 'ask first', 'A question to settle before anything gets built. Answer it (n, then a), or press G to let the AI go with its recommendations.'],
+  ['', C.dim, 'why', 'The problem the work solves. Until the goal and the why are agreed, the AI asks before it builds.'],
   ['✕', C.rejected, 'rejected', "You said no. Claude won't act on it or propose it again."],
   ['●', C.spark, 'bright', 'New or just changed.'],
   ['·', C.ghost, 'fading', 'Just removed: forgotten, as if it was never there.'],
@@ -261,7 +263,7 @@ function drawHelp(S, W, H) {
     else { rows.push({kind: 'item', g, col, name, text: ''}); wrap(desc, descW).forEach(l => rows.push({kind: 'item', text: l})); }
   }
   rows.push({kind: 'plain', text: ''});
-  for (const l of wrap('↵ next that needs you · ↑↓ select, then a agree · d disagree · o open · n note · x x forget it · ←→ topic · pgup/pgdn page · g newest topic · tab next consensus · p pin · m mesh · ? / esc close · q quit', boxW - 4)) rows.push({kind: 'plain', text: l});
+  for (const l of wrap('↵ next that needs you · G go: skip the ask-first questions · ↑↓ select, then a agree · d disagree · o open · n note · x x forget it · ←→ topic · pgup/pgdn page · g newest topic · tab next consensus · p pin · m mesh · ? / esc close · q quit', boxW - 4)) rows.push({kind: 'plain', text: l});
   const boxH = Math.min(H - 2, rows.length + 3), x0 = Math.max(0, Math.floor((W - boxW) / 2)), y0 = Math.max(0, Math.floor((H - boxH) / 2));
   const border = C.dim, blank = ' '.repeat(Math.max(0, boxW - 2));
   S.text(x0, y0, '╭' + '─'.repeat(boxW - 2) + '╮', border);
@@ -315,8 +317,11 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   const parts = [[`● ${counts.agreed}${named ? ' agreed' : ''}`, C.agreed], [`◆ ${counts.open}${named ? ' open' : ''}`, C.open], [`○ ${counts.assumed}${named ? ' assumed' : ''}`, C.assumed]];
   if (counts.rejected) parts.push([`✕ ${counts.rejected}${named ? ' rejected' : ''}`, C.rejected]);
   // needs you: assumptions and open questions waiting for the user's answer, newest first
-  const needs = alive.filter(n => n.status === 'assumed' || n.status === 'open');
-  model.needs = needs.map(n => n.id);
+  // ask-first questions come first: they hold up the building
+  const asks = alive.filter(n => n.ask);
+  const needs = [...asks, ...alive.filter(n => !n.ask && (n.status === 'assumed' || n.status === 'open'))];
+  model.needs = needs.map(n => n.id); model.asks = asks.length;
+  if (st && asks.length) parts.unshift([`? ${asks.length}${named ? ' ask first' : ''}`, mix(C.open, C.goal, 0.4 + 0.4 * Math.sin(t * 4))]);
   if (st) parts.unshift(needs.length
     ? [`⚑ ${needs.length}${named ? ' need you' : ''}`, mix(C.open, C.goal, 0.25 + 0.25 * Math.sin(t * 3))]
     : [named ? '✓ all clear' : '✓', mix(C.agreed, C.dim, 0.5)]);
@@ -337,6 +342,15 @@ function frame(now, W, H, color = true, rowPrefix = null) {
     S.text(7, y, i === 1 && wrap(model.goal, W - 8).length > 2 ? truncate(l + ' …', W - 8) : l, model.goal ? tone(goalFresh ? C.spark : C.goal) : tone(C.dim), !!model.goal);
     y++;
   });
+  // the why: the problem it solves. Missing while a goal exists = the AI should ask before building.
+  if (st && (st.why || model.goal)) {
+    const wl = st.why ? wrap(String(st.why), W - 8) : ['not agreed yet: the AI asks before it builds'];
+    wl.slice(0, 2).forEach((l, i) => {
+      if (i === 0) S.text(1, y, 'why', tone(C.dim));
+      S.text(7, y, i === 1 && wl.length > 2 ? truncate(l + ' …', W - 8) : l, st.why ? tone(mix(C.text, C.goal, 0.3)) : tone(mix(C.open, C.dim, 0.35)), false);
+      y++;
+    });
+  }
   // what Claude is doing right now (from the plugin's activity hook)
   if (act && W >= 30) {
     const spin = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'[Math.floor(t * 10) % 10], pulse = 0.5 + 0.5 * Math.sin(t * 3);
@@ -353,6 +367,8 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   const hintRow = H - 1;
   const hint = model.sel
     ? (W >= 84 ? 'a agree · d disagree · o open · n note · x forget · esc done' : W >= 40 ? 'a · d · o · n · x · esc' : 'esc')
+    : model.asks
+      ? (W >= 80 ? '↵ answer first · n note · a agree · G go with its picks · ? help' : W >= 44 ? '↵ answer · G go · ? help' : '↵ · G')
     : model.needs.length
       ? (W >= 88 ? '↵ next that needs you · ↑↓ select · + add · ←→ topic · ? help' : W >= 44 ? '↵ next · ↑↓ · + add · ←→ · ? help' : '↵ next')
       : (W >= 80 ? 'q quit · ↑↓ select · + add · ←→ topic · ? help' : W >= 44 ? 'q · ↑↓ · + add · ←→ · ? help' : '? help');
@@ -590,6 +606,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
       S.text(side === 'left' ? 1 : c + 2, r + i, shown, isNote ? ncol : sel ? tcol : pcol ? tone(pcol) : tcol, !isNote && (f || sel || rec || n.rank === 0));
       if (side === 'right') S.text(c + 1, r + i, ' ', null);
     });
+    if (n.ask && !rec) { const tag = '?', tx = c - 2; if (tx >= 0) S.text(tx, r, tag, tone(mix(C.open, C.goal, 0.3 + 0.3 * Math.sin(t * 3 + n.seed * 6))), true); }
     if (rec) { // "new ✦" / "changed ✦" just left of the node, so it never mixes with the item's text
       const tag = n.changed > (n.arrived ?? -1e12) ? 'changed ✦' : 'new ✦', tx = c - 2 - [...tag].length;
       if (tx >= 0) S.text(tx, r, tag, tone(mix(C.spark, C.goal, 0.5 + 0.5 * Math.sin(t * 4))), true);
@@ -678,6 +695,16 @@ function addItem(text, status) {
     say(`${GLYPH[status]} added as ${status}${topic ? ` in ${topic}` : ''}: Claude sees it with your next message`, C[status]);
   } catch (e) { say(String(e.stderr || e.message).trim().split('\n')[0] || 'write failed', C.ghost); }
 }
+// G: "go" — let the AI proceed on its recommended answers to the ask-first questions
+function goAhead() {
+  const st = model.state;
+  if (!st) return;
+  if (st.enabled === false) return say('harness is off: nothing changed', C.ghost);
+  if (!model.asks) return say('no ask-first questions to skip', C.dim);
+  if (!fs.existsSync(STATE_CLI)) return say('state script not found: set CONSENSUS_STATE_CLI', C.ghost);
+  try { runState(st, ['go'], ''); say('▶ go: the AI proceeds on its own recommendations (saved as assumed)', C.agreed); }
+  catch (e) { say(String(e.stderr || e.message).trim().split('\n')[0] || 'write failed', C.ghost); }
+}
 function act(kind) {
   const st = model.state, n = model.sel && model.nodes.get(model.sel);
   if (!st || !n) return;
@@ -759,6 +786,7 @@ if (process.stdin.isTTY) {
     else if (model.sel && k === 'x') act('remove');
     else if (k === '\r' || k === '\n') nextNeed();
     else if (model.sel && k === 'd') { if (act('rejected')) model.input = {text: '', label: 'why? (optional): '}; }
+    else if (k === 'G') goAhead();
     else if (k === '+' || k === '=') { if (model.state?.enabled === false) say('harness is off: nothing changed', C.ghost); else if (!model.state) say('no consensus to add to yet', C.ghost); else model.input = {mode: 'add', text: '', label: 'your item: '}; }
     else if (model.sel && k === 'n') { if (model.state?.enabled === false) say('harness is off: nothing changed', C.ghost); else model.input = {text: ''}; }
     else if (k === 'm') opt.mesh = !opt.mesh;

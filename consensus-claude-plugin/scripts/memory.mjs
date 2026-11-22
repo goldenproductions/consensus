@@ -42,6 +42,7 @@ function compact(st, session) {
     start: times.length ? Math.min(...times) : Date.now(),
     end: Date.now(),
     goal: st.goal || '',
+    why: st.why || '',
     gist: (st.gist || '').replace(/\s*\n\s*/g, ' '),
     decisions: [...pick('agreed'), ...pick('rejected'), ...pick('open').slice(-MAX_OPEN)].map(decision),
   };
@@ -90,6 +91,7 @@ export function renderMemory(project, currentSession = '') {
   }
   const out = eps.slice(0, SHOWN).map((e, i) => {
     let s = `- ${day(e.end)} · ${e.goal || '(no goal agreed)'}`;
+    if (e.why) s += `\n  why: ${e.why}`;
     if (e.gist) s += `\n  gist: ${e.gist.replace(/\s*\n\s*/g, ' ')}`;
     if (i < FULL) {
       for (const d of e.decisions) s += `\n  ${d.status.toUpperCase()}${d.topic ? ` {${d.topic}}` : ''}: ${d.text}${d.notes.length ? ` (user note: ${d.notes.join('; ')})` : ''}`;

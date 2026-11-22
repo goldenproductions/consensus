@@ -32,6 +32,10 @@ Order comes from the `at`/`updated` timestamps the state script writes (plugin 0
 
 Under the goal, a status line shows what Claude is doing in the followed session: `⠼ Claude · editing brain.mjs`, `⚠ Claude needs your permission…`, or `◉ your turn` (plus how many items need you). The brain shows it too: while Claude **thinks**, slow violet waves roll out from the goal; while it **works**, the network fills with fast sparks in the colour of the work (cyan reading or searching, amber editing, green running commands, magenta delegating, blue on the web); when it **waits for your permission**, the network dims and an amber beacon pulses from the goal; on **your turn** it settles down. This comes from the plugin's activity hook (plugin 0.6.0+), which writes `~/.consensus-harness/activity/<session>.json` on each prompt, tool call, notification and stop. Labels are file names or the tool's own short description, never command text.
 
+## Ask first
+
+On a vague request ("build me a website with images of cars") the AI asks before it builds: the why (the problem it solves) and the 1-3 questions that would most change the result, each with its recommendation. The header shows `? 2 ask first`, those questions carry a `?` beside their node and come first when you press `enter`, and a `why` line under the goal shows the agreed why (or that it isn't agreed yet). Answer with `n` (your answer as a note) and `a`, or in the chat. Press `G` to let the AI go with its own recommendations; they are saved as assumed. Nothing is blocked: it's a nudge, not a lock.
+
 ## What needs you
 
 The header shows `⚑ 2 need you`: the assumptions and open questions Claude is waiting on, across all topics (or `✓ all clear`). Press `enter` to jump to the next one, in whatever topic it is, then answer it with `a`, `d` or `n`.
