@@ -29,10 +29,12 @@ const MAX_ITEMS=15;
 // Rejected right after agreed: a "no" must stay in view so Claude doesn't propose it again.
 const rank={agreed:0,rejected:1,open:2,assumed:3};
 const ordered=state.items.map((x,i)=>[x,i]).sort((a,b)=>(rank[a[0].status]??3)-(rank[b[0].status]??3)||a[1]-b[1]).map(([x])=>x);
-// Agreed and rejected items are binding, so they are always shown; the cap only trims open and assumed ones.
-const binding=ordered.filter(x=>x.status==='agreed'||x.status==='rejected');
+// Agreed and rejected items are binding, and the user's own items are their words: always shown.
+// The cap only trims Claude's open and assumed items, and the newest few of those always stay in view.
+const binding=ordered.filter(x=>x.status==='agreed'||x.status==='rejected'||x.by==='user');
 const rest=ordered.filter(x=>!binding.includes(x));
-const shown=[...binding,...rest.slice(0,Math.max(0,MAX_ITEMS-binding.length))];
+const keep=new Set([...rest].sort((a,b)=>(b.updated||b.at||0)-(a.updated||a.at||0)).slice(0,Math.max(5,MAX_ITEMS-binding.length)));
+const shown=ordered.filter(x=>binding.includes(x)||keep.has(x));
 const hidden=ordered.filter(x=>!shown.includes(x));
 const counts=['agreed','rejected','open','assumed'].map(st=>[st,hidden.filter(x=>x.status===st).length]).filter(([,n])=>n).map(([st,n])=>`${n} ${st}`).join(', ');
 const noteLines=x=>(x.notes||[]).map(n=>`\n    ↳ ${n.by==='user'?'user note':'note'}: ${n.text}`).join('');

@@ -23,6 +23,28 @@ claude plugin install consensus-harness@consensus-local
 
 Or inside Claude Code: `/plugin marketplace add /absolute/path/to/consensus-skill`, then `/plugin install consensus-harness@consensus-local`. After changing the plugin, bump `version` in both `plugin.json` and `marketplace.json`, run `claude plugin marketplace update consensus-local`, and start a new session. Remove with `claude plugin uninstall consensus-harness@consensus-local`.
 
+## Codex
+
+Codex (0.171+) reads this plugin as it is: it understands `.claude-plugin/`, `hooks/hooks.json` and `${CLAUDE_PLUGIN_ROOT}`. The consensus, memory, viewer and activity are shared: the viewer shows a Codex session like a Claude one, with "Codex" in the activity line.
+
+```bash
+codex plugin marketplace add /absolute/path/to/consensus-skill
+codex plugin add consensus-harness@consensus-local
+```
+
+Then, in `~/.codex/config.toml`:
+
+```toml
+[features]
+hooks = true
+
+# the model writes the consensus with the state script; let the sandbox write there
+[sandbox_workspace_write]
+writable_roots = ["/home/<you>/.consensus-harness"]
+```
+
+Start `codex` and choose **Trust all and continue** when it asks to review the new hooks (or review them with `/hooks`). Codex asks again whenever the hooks change. Turn the harness on per folder with `node consensus-claude-plugin/scripts/state.mjs on` from that folder. After changing the plugin, bump the version and run `codex plugin add consensus-harness@consensus-local` again. The unslop companion is Claude Code only.
+
 ## Companion plugin: unslop
 
 `consensus-harness` depends on [unslop](https://github.com/heydamir/unslop) (CC-BY-4.0, by Damir Sokolovsky). The `consensus-local` marketplace lists it straight from upstream, pinned to a reviewed commit, so installing consensus-harness installs and enables unslop too. Nothing of unslop is copied into this repo. The harness treats unslop's confirmed design direction as an agreed `UI direction:` item, so later unslop runs and other work in the project stay on that direction. To move to a newer unslop, review the upstream diff, change `sha` in `.claude-plugin/marketplace.json`, and run `claude plugin marketplace update consensus-local`.
@@ -74,7 +96,7 @@ The Consensus viewer (`consensus-viz/`) writes through the same state script wit
 
 ## Live activity for the viewer
 
-`scripts/activity.mjs` runs on UserPromptSubmit, PreToolUse, Notification, Stop and SessionEnd and writes the session's current activity (thinking, working on X, waiting, your turn) to `~/.consensus-harness/activity/<session>.json` for the Consensus viewer. It prints nothing, takes a few tens of milliseconds, and records only file names or the tool's own description, never command text. It does nothing while the harness is off.
+`scripts/activity.mjs` runs on UserPromptSubmit, PreToolUse, PermissionRequest, Notification, Stop and SessionEnd (in Claude Code and Codex) and writes the session's current activity (thinking, working on X, waiting, your turn) to `~/.consensus-harness/activity/<session>.json` for the Consensus viewer. It prints nothing, takes a few tens of milliseconds, and records only file names or the tool's own description, never command text. It does nothing while the harness is off.
 
 ## Requirements
 

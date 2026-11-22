@@ -48,6 +48,9 @@ const C = {
   goal: [241, 245, 249], mesh: [90, 108, 150], spark: [186, 230, 253], ghost: [150, 150, 160],
   text: [203, 213, 225], dim: [100, 116, 139], off: [120, 120, 130],
 };
+// Claude's live activity: one colour per kind of work
+const KIND = {think: [167, 139, 250], read: [34, 211, 238], edit: [251, 191, 36], run: [74, 222, 128], delegate: [232, 121, 249], web: [96, 165, 250], plan: [186, 230, 253], tool: [186, 230, 253]};
+const kindOf = a => a.kind || (a.state === 'thinking' ? 'think' : /^reading|^searching/.test(a.label || '') ? 'read' : /^editing|^writing/.test(a.label || '') ? 'edit' : /^delegat/.test(a.label || '') ? 'delegate' : /the web/.test(a.label || '') ? 'web' : 'run');
 const GLYPH = {agreed: '●', open: '◆', assumed: '○', rejected: '✕'};
 const RANK = {agreed: 0, open: 1, assumed: 2, rejected: 3};
 const FRESH_MS = 6000;   // bright arrival phase
@@ -244,7 +247,7 @@ const HOWTO = [
   'Talk with Claude as usual. Decisions land here, by topic.',
   "○ ◆ wait for you (⚑). ↵ jumps there: a agree, d disagree, n note.",
   '● agreed is what Claude works from. ◆ open is undecided.',
-  'Your changes here reach Claude with your next message.',
+  'Your changes here, and your own items (+), reach Claude with your next message.',
 ];
 function drawHelp(S, W, H) {
   const boxW = Math.min(W - 2, 76), wide = boxW >= 56, nameW = 11;
@@ -284,6 +287,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   const t = now / 1000, S = new Screen(W, H), st = model.state, off = !!st && st.enabled === false;
   const act = st && !off ? model.act : null, fresh10 = act && Date.now() - act.at < 600000;
   const busy = !!(fresh10 && (act.state === 'working' || act.state === 'thinking')), waitingP = !!(fresh10 && act.state === 'waiting');
+  const thinking = busy && act.state === 'thinking', kcol = busy ? KIND[kindOf(act)] || C.spark : C.spark;
   const tone = (col, k = 1) => { const c = off ? mix(col, C.off, 0.75) : col; const kk = off ? k * 0.6 : k; return [c[0] * kk, c[1] * kk, c[2] * kk]; };
   const glow = (col, k) => off ? k * 0.6 : k;
 
@@ -336,8 +340,9 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   // what Claude is doing right now (from the plugin's activity hook)
   if (act && W >= 30) {
     const spin = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'[Math.floor(t * 10) % 10], pulse = 0.5 + 0.5 * Math.sin(t * 3);
-    const [icon, col, text] = waitingP ? ['⚠', mix(C.open, C.goal, 0.3 * pulse), act.label]
-      : busy ? [spin, C.spark, `Claude · ${act.label}`]
+    const who = act.agent || 'Claude', waitText = /^(Claude|Codex)\b/.test(act.label || '') ? act.label : `${who} ${act.label}`;
+    const [icon, col, text] = waitingP ? ['⚠', mix(C.open, C.goal, 0.3 * pulse), waitText]
+      : busy ? [spin, mix(kcol, C.goal, 0.2), `${who} · ${act.label}`]
       : act.state === 'idle' ? ['◉', mix(C.agreed, C.goal, 0.3 * pulse), model.needs.length ? `your turn · ⚑ ${model.needs.length} need you, press enter` : 'your turn']
       : ['·', C.dim, act.state === 'ended' ? 'session ended' : 'idle'];
     S.text(1, y, icon, tone(col), true); S.text(3, y, truncate(text, W - 5), tone(col), busy || waitingP || act.state === 'idle'); y++;
@@ -349,9 +354,16 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   const hint = model.sel
     ? (W >= 84 ? 'a agree · d disagree · o open · n note · x forget · esc done' : W >= 40 ? 'a · d · o · n · x · esc' : 'esc')
     : model.needs.length
-      ? (W >= 80 ? '↵ next that needs you · ↑↓ select · ←→ topic · ? help' : W >= 40 ? '↵ next · ↑↓ · ←→ · ? help' : '↵ next')
-      : (W >= 72 ? 'q quit · ↑↓ select · ←→ topic · ? help' : W >= 40 ? 'q · ↑↓ · ←→ · ? help' : '? help');
-  if (model.input) {
+      ? (W >= 88 ? '↵ next that needs you · ↑↓ select · + add · ←→ topic · ? help' : W >= 44 ? '↵ next · ↑↓ · + add · ←→ · ? help' : '↵ next')
+      : (W >= 80 ? 'q quit · ↑↓ select · + add · ←→ topic · ? help' : W >= 44 ? 'q · ↑↓ · + add · ←→ · ? help' : '? help');
+  if (model.input?.mode === 'status') {
+    const opts = W >= 70 ? '  a agreed (a rule) · o open (a question) · esc cancel' : '  a agreed · o open · esc';
+    const label = 'save as:', room = Math.max(4, W - label.length - [...opts].length - 4);
+    S.text(1, hintRow, label, C.goal, true);
+    S.text(2 + label.length, hintRow, truncate(model.input.text, room), C.text);
+    S.text(W - 1 - [...opts].length, hintRow, opts, C.goal, true);
+  }
+  else if (model.input) {
     const label = model.input.label || 'note: ', room = Math.max(4, W - label.length - 4), txt = [...model.input.text];
     S.text(1, hintRow, label, C.open, true);
     S.text(1 + label.length, hintRow, (txt.length > room ? '…' + txt.slice(-room + 1).join('') : model.input.text) + '▌', C.goal, true);
@@ -450,19 +462,24 @@ function frame(now, W, H, color = true, rowPrefix = null) {
     const M = getMesh(PW, PH);
     for (const [i, j] of M.links) {
       const p = M.pts[i], q = M.pts[j];
-      S.line(p.x, p.y, q.x, q.y, tone(C.mesh), glow(0, 0.27 + 0.08 * Math.sin(t * p.sp + p.ph)), 2);
+      // working: the network takes on the colour of the work; waiting: it dims while Claude holds
+      S.line(p.x, p.y, q.x, q.y, tone(busy ? mix(C.mesh, kcol, 0.3) : C.mesh), glow(0, (waitingP ? 0.6 : 1) * (0.27 + 0.08 * Math.sin(t * p.sp + p.ph))), 2);
     }
     const wt = now - (model.arrival || -1e12), waving = wt < 1600 && !off;
     const maxD = Math.hypot(PW, PH) / 2, waveR = (wt / 1600) * maxD;
     for (const p of M.pts) {
-      S.dot(p.x, p.y, tone(C.mesh), glow(0, 0.65 + 0.3 * Math.sin(t * p.sp * 1.7 + p.ph)));
+      S.dot(p.x, p.y, tone(busy ? mix(C.mesh, kcol, 0.35) : C.mesh), glow(0, (waitingP ? 0.55 : 1) * (0.65 + 0.3 * Math.sin(t * p.sp * 1.7 + p.ph))));
+      if (thinking && !waving) { // thinking: slow violet waves roll out from the goal, one every 2.4 s
+        const d = Math.hypot(p.x - cx, p.y - cy);
+        for (let w = 0; w < 2; w++) { const r = (((t + w * 1.2) % 2.4) / 2.4) * maxD, b = 0.8 * Math.exp(-((d - r) ** 2) / (2 * 10 ** 2)) * (1 - r / maxD); if (b > 0.05) { S.dot(p.x, p.y, KIND.think, b); S.dot(p.x + 1, p.y, KIND.think, b * 0.6); } }
+      }
       if (waving) { const b = Math.exp(-((Math.hypot(p.x - cx, p.y - cy) - waveR) ** 2) / (2 * 14 ** 2)); if (b > 0.05) { S.dot(p.x, p.y, C.spark, b); S.dot(p.x + 1, p.y, C.spark, b * 0.7); } }
     }
-    if (now > M.nextSpark && M.links.length && !off) { M.sparks.push({l: M.links[Math.floor(Math.random() * M.links.length)], s: now}); M.nextSpark = now + (waving ? 20 : busy ? 35 : waitingP ? 120 : 400 + Math.random() * 800); }
+    if (now > M.nextSpark && M.links.length && !off) { M.sparks.push({l: M.links[Math.floor(Math.random() * M.links.length)], s: now, col: waving ? C.spark : busy ? mix(kcol, C.goal, 0.25) : C.spark}); M.nextSpark = now + (waving ? 20 : thinking ? 70 : busy ? 25 : waitingP ? 600 : 800 + Math.random() * 1400); }
     M.sparks = M.sparks.filter(sp => now - sp.s < 900);
     for (const sp of M.sparks) {
       const p = M.pts[sp.l[0]], q = M.pts[sp.l[1]], u = (now - sp.s) / 900;
-      for (let k = 0; k < 4; k++) { const v = u - k * 0.04; if (v >= 0) S.dot(p.x + (q.x - p.x) * v, p.y + (q.y - p.y) * v, C.spark, 0.7 - k * 0.15); }
+      for (let k = 0; k < 4; k++) { const v = u - k * 0.04; if (v >= 0) S.dot(p.x + (q.x - p.x) * v, p.y + (q.y - p.y) * v, sp.col || C.spark, 0.75 - k * 0.15); }
     }
   }
 
@@ -486,6 +503,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   }
   const placed = alive.filter(n => n.cell && now >= n.born);
   model.order = items.map(n => n.id);
+  if (model.selText) { const n = items.find(x => x.text === model.selText); if (n) { model.sel = n.id; model.selText = null; } }
   if (model.sel && !model.order.includes(model.sel)) model.sel = null;
   // lobe links between neighbours of the same status in the same column
   for (let i = 1; i < placed.length; i++) {
@@ -543,6 +561,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   for (let rr = 1; rr <= 3; rr++) S.ring(cx, cy, rr, tone(C.goal), glow(0, 0.75 * gk));
   S.ring(cx, cy, 5 + Math.sin(t * (busy ? 5 : 1.6)) * (busy ? 1.4 : 0.8), tone(waitingP ? C.open : C.goal), glow(0, (busy || waitingP ? 0.8 : 0.55) * gk));
   S.ring(cx, cy, 9 + Math.sin(t * 1.1 + 1) * 1.2, tone(C.goal), glow(0, 0.2 * gk), 2);
+  if (waitingP && !off) for (let k = 0; k < 2; k++) { const p = ((t + k * 0.7) % 1.4) / 1.4; S.ring(cx, cy, 4 + 16 * easeOut(p), C.open, 0.9 * (1 - p)); } // amber beacon: Claude needs you
   if (goalFresh) { const p = clamp((now - model.goalChanged) / 1800, 0, 1); if (p < 1) S.ring(cx, cy, 6 + 20 * easeOut(p), C.spark, 1 - p); }
   S.text(Math.floor(cx / 2), S.gy + Math.floor(cy / 4), model.goal ? '◉' : '◌', tone(C.goal, gk), true);
 
@@ -647,6 +666,18 @@ function addNote(text) {
   try { runState(st, ['note', n.id, '-'], text); say('↳ note added', C.open); }
   catch (e) { say(String(e.stderr || e.message).trim().split('\n')[0] || 'write failed', C.ghost); }
 }
+// Your own item: a decision/constraint (agreed) or a question (open), filed under the topic you're looking at.
+function addItem(text, status) {
+  const st = model.state;
+  if (!st) return;
+  if (!fs.existsSync(STATE_CLI)) return say('state script not found: set CONSENSUS_STATE_CLI', C.ghost);
+  const topic = model.openSeg && model.openSeg !== 'General' ? model.openSeg : '';
+  try {
+    runState(st, ['add', status, ...(topic ? ['--topic', topic] : []), '-'], text);
+    model.selText = text; // select it once it shows up
+    say(`${GLYPH[status]} added as ${status}${topic ? ` in ${topic}` : ''}: Claude sees it with your next message`, C[status]);
+  } catch (e) { say(String(e.stderr || e.message).trim().split('\n')[0] || 'write failed', C.ghost); }
+}
 function act(kind) {
   const st = model.state, n = model.sel && model.nodes.get(model.sel);
   if (!st || !n) return;
@@ -692,10 +723,22 @@ if (process.stdin.isTTY) {
     const k = d.toString();
     const bgm = /\x1b\]11;rgb:([0-9a-f]{2})[0-9a-f]*\/([0-9a-f]{2})[0-9a-f]*\/([0-9a-f]{2})/i.exec(k);
     if (bgm) { if (!opt.bgSet) BG = [1, 2, 3].map(j => parseInt(bgm[j], 16)); return; }
-    if (model.input) { // typing a note: enter saves, esc cancels
+    if (model.input?.mode === 'status') { // second step of +: agreed or open
+      if (k === '\x03') process.exit(0);
+      const t = model.input.text;
+      if (k === 'a' || k === '\r' || k === '\n') { model.input = null; addItem(t, 'agreed'); }
+      else if (k === 'o' || k === '?') { model.input = null; addItem(t, 'open'); }
+      else if (k === '\x1b') model.input = null;
+      return;
+    }
+    if (model.input) { // typing a note or a new item: enter saves, esc cancels
       if (k === '\x03') process.exit(0);
       else if (k === '\x1b') model.input = null;
-      else if (k === '\r' || k === '\n') { const t = model.input.text.trim(); model.input = null; if (t) addNote(t); }
+      else if (k === '\r' || k === '\n') {
+        const t = model.input.text.trim(), mode = model.input.mode; model.input = null;
+        if (t && mode === 'add') model.input = {mode: 'status', text: t};
+        else if (t) addNote(t);
+      }
       else if (k === '\x7f' || k === '\b') model.input.text = [...model.input.text].slice(0, -1).join('');
       else if (!k.startsWith('\x1b')) model.input.text += k.replace(/[\x00-\x1f\x7f]/g, ' ');
       return;
@@ -716,6 +759,7 @@ if (process.stdin.isTTY) {
     else if (model.sel && k === 'x') act('remove');
     else if (k === '\r' || k === '\n') nextNeed();
     else if (model.sel && k === 'd') { if (act('rejected')) model.input = {text: '', label: 'why? (optional): '}; }
+    else if (k === '+' || k === '=') { if (model.state?.enabled === false) say('harness is off: nothing changed', C.ghost); else if (!model.state) say('no consensus to add to yet', C.ghost); else model.input = {mode: 'add', text: '', label: 'your item: '}; }
     else if (model.sel && k === 'n') { if (model.state?.enabled === false) say('harness is off: nothing changed', C.ghost); else model.input = {text: ''}; }
     else if (k === 'm') opt.mesh = !opt.mesh;
     else if (k === 'p') { model.pinned = !model.pinned; lastPoll = 0; }

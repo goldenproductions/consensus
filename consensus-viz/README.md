@@ -30,7 +30,7 @@ Order comes from the `at`/`updated` timestamps the state script writes (plugin 0
 
 ## Live activity
 
-Under the goal, a status line shows what Claude is doing in the followed session: `⠼ Claude · editing brain.mjs`, `⚠ Claude needs your permission…`, or `◉ your turn` (plus how many items need you). While Claude works the brain fires faster; when it waits for permission the goal neuron turns amber. This comes from the plugin's activity hook (plugin 0.6.0+), which writes `~/.consensus-harness/activity/<session>.json` on each prompt, tool call, notification and stop. Labels are file names or the tool's own short description, never command text.
+Under the goal, a status line shows what Claude is doing in the followed session: `⠼ Claude · editing brain.mjs`, `⚠ Claude needs your permission…`, or `◉ your turn` (plus how many items need you). The brain shows it too: while Claude **thinks**, slow violet waves roll out from the goal; while it **works**, the network fills with fast sparks in the colour of the work (cyan reading or searching, amber editing, green running commands, magenta delegating, blue on the web); when it **waits for your permission**, the network dims and an amber beacon pulses from the goal; on **your turn** it settles down. This comes from the plugin's activity hook (plugin 0.6.0+), which writes `~/.consensus-harness/activity/<session>.json` on each prompt, tool call, notification and stop. Labels are file names or the tool's own short description, never command text.
 
 ## What needs you
 
@@ -49,6 +49,10 @@ Press `↓` to select an item (the first press lands on the first assumption), m
 
 The selected item keeps its status colour and breathes; the footer names its status (`○ assumed · a agree …`).
 
+## Add your own items
+
+Press `+` and type a rule, constraint or question (`enter` continues, `esc` cancels), then choose how to save it: `a` agreed (a decision or rule Claude must follow; `enter` does the same) or `o` open (a question to settle). It lands in the topic you're looking at, marked as yours, and Claude is told about it on your next message, so you don't have to say it in the chat.
+
 The change is written through the plugin's own state script (`consensus-claude-plugin/scripts/state.mjs`, or `$CONSENSUS_STATE_CLI`), so the same rules apply as when Claude writes. Claude sees it in its context on your next prompt. Nothing is written when the harness is off. While an item is selected the viewer stays on the current consensus instead of following a newer one.
 
 Apart from these actions it only reads `~/.consensus-harness/` (or `$CONSENSUS_HOME`). Node.js 20+, no dependencies.
@@ -58,7 +62,7 @@ Apart from these actions it only reads `~/.consensus-harness/` (or `$CONSENSUS_H
 1. Talk with Claude as usual. Goal and decisions land here.
 2. ○ is Claude's assumption. Check it: `↓` to select, `a` to agree.
 3. ● agreed is what Claude works from. ◆ open is undecided.
-4. Your changes here reach Claude with your next message.
+4. Your changes here, and your own items (+), reach Claude with your next message.
 
 The same four lines open the `?` overlay, and an empty consensus points new users there.
 
@@ -73,7 +77,7 @@ node consensus-viz/brain.mjs --once --size 100x36   # print one frame and exit
 
 Press `?` for an overlay with the four steps below and what each status means for you and Claude (`?` or `esc` closes it).
 
-Keys: `enter` next item that needs you · `↑↓` select · `a`/`d`/`o`/`n`/`x` act on the selection · `←→` topic · `pgup/pgdn` page · `g` newest topic · `q` quit · `tab` cycle through all stored consensus states (pins) · `p` toggle pinned/following · `m` toggle the mesh · `?` legend.
+Keys: `enter` next item that needs you · `↑↓` select · `a`/`d`/`o`/`n`/`x` act on the selection · `+` add your own item · `←→` topic · `pgup/pgdn` page · `g` newest topic · `q` quit · `tab` cycle through all stored consensus states (pins) · `p` toggle pinned/following · `m` toggle the mesh · `?` legend.
 
 By default it follows the most recently changed state file, so it jumps to whatever Claude session last recorded something. With two sessions active, press `p` to stay on one.
 
