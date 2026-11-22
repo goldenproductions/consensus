@@ -1,0 +1,7 @@
+{
+  "description": "Load current project consensus and conversation guidance when enabled",
+  "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/hook.mjs"], "timeout": 5}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/hook.mjs"], "timeout": 5}]}]
+  }
+}
