@@ -24,7 +24,8 @@ const guidance=`Consensus Harness is enabled for this project. Conversational wo
 - Distinguish agreed facts from your assumptions; never claim agreement without evidence from the user's words.
 - When user explicitly agrees or changes a decision, update shared state via the state manager below if tools are available. Never change agreed status based solely on your own suggestion.
 - Do not perform major coding actions that contradict agreed items without discussing it first.
-- The user may disable this harness; do not override this.`;
+- The user may disable this harness; do not override this.
+- Working with the unslop skill: before proposing an unslop direction, check the agreed items for an existing "UI direction" and build on it instead of inventing a new one. When the user confirms unslop's direction (product, character, world, moments, signature), save it as one agreed item "UI direction: <the five lines, condensed>" and the audit's heavy/light/no-slop verdict as assumed. Edit that item, don't add a second one, if the direction changes later.`;
 
 // Full guidance once per session start (also fires after /clear and compaction); per prompt only the live state.
 const context = event==='SessionStart'

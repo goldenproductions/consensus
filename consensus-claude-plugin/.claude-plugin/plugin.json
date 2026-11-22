@@ -1,6 +1,11 @@
 {
   "name": "consensus-harness",
   "description": "Conversation-first shared understanding for Claude Code, without separate model API keys",
-  "version": "0.1.1",
-  "author": {"name": "Consensus Harness"}
+  "version": "0.2.0",
+  "author": {
+    "name": "Consensus Harness"
+  },
+  "dependencies": [
+    "unslop"
+  ]
 }

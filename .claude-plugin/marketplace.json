@@ -1,13 +1,29 @@
 {
   "name": "consensus-local",
-  "owner": {"name": "Consensus Harness"},
-  "metadata": {"description": "Local marketplace for the Consensus Harness plugin"},
+  "owner": {
+    "name": "Consensus Harness"
+  },
+  "metadata": {
+    "description": "Local marketplace for the Consensus Harness plugin"
+  },
   "plugins": [
     {
       "name": "consensus-harness",
       "source": "./consensus-claude-plugin",
       "description": "Conversation-first shared understanding for Claude Code, without separate model API keys",
-      "version": "0.1.1"
+      "version": "0.2.0",
+      "dependencies": [
+        "unslop"
+      ]
+    },
+    {
+      "name": "unslop",
+      "source": {
+        "source": "github",
+        "repo": "heydamir/unslop",
+        "sha": "620163eedb3529d9cd23a3994ed8d287d06f760d"
+      },
+      "description": "Upstream heydamir/unslop (CC-BY-4.0, Damir Sokolovsky), pinned to a reviewed commit. Turns AI-looking UI into a designed interface."
     }
   ]
 }
