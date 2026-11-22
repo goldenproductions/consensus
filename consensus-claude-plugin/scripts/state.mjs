@@ -84,12 +84,16 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   let folder, state;
   try {folder=load(cwd); state=session?load(cwd,session):folder;} catch(e){fail(e.message)}
   const on=folder.enabled;
+  // Who made the change: the Consensus viewer sets CONSENSUS_BY=user, everything else is Claude.
+  const by = process.env.CONSENSUS_BY === 'user' ? 'user' : 'claude';
+  const log = ev => { state.events = [...(state.events || []), {at: Date.now(), by, ...ev}].slice(-30); };
   if (command==='on' || command==='off') {folder.enabled=command==='on'; save(folder,cwd); console.log(`Consensus Harness ${command.toUpperCase()} for ${cwd}`);}
   else if (command==='status' || !command){console.log(summary({...state,enabled:on}));}
   else if (command==='goal') {if(!on) fail('Harness is off.'); const text=textOf(args);if(!text)fail('Usage: goal <text|->');state.goal=text;save(state,cwd,session);console.log('Goal updated.');}
-  else if (command==='add') {if(!on)fail('Harness is off.');const [status,...words]=args;const text=textOf(words);if(!['agreed','assumed','open'].includes(status)||!text)fail('Usage: add <agreed|assumed|open> <text|->');if(state.items.some(x=>x.text.toLowerCase()===text.toLowerCase()))fail('Duplicate item');const now=Date.now();state.items.push({id:crypto.randomUUID(),status,text,at:now,updated:now});save(state,cwd,session);console.log('Item added.');}
-  else if (command==='edit') {if(!on)fail('Harness is off.');const [id,status,...words]=args;const text=textOf(words);if(!id||!['agreed','assumed','open'].includes(status)||!text)fail('Usage: edit <id> <status> <text|->');const {item,error}=findItem(state,id);if(error)fail(error);item.status=status;item.text=text;item.updated=Date.now();save(state,cwd,session);console.log('Item updated.');}
-  else if (command==='remove') {if(!on)fail('Harness is off.');const {item,error}=findItem(state,args[0]);if(error)fail(error);state.items=state.items.filter(x=>x!==item);save(state,cwd,session);console.log('Item removed.');}
+  else if (command==='add') {if(!on)fail('Harness is off.');const [status,...words]=args;const text=textOf(words);if(!['agreed','assumed','open','rejected'].includes(status)||!text)fail('Usage: add <agreed|assumed|open|rejected> <text|->');if(state.items.some(x=>x.text.toLowerCase()===text.toLowerCase()))fail('Duplicate item');const now=Date.now(),id=crypto.randomUUID();state.items.push({id,status,text,at:now,updated:now,by});log({action:'add',id,status,text});save(state,cwd,session);console.log('Item added.');}
+  else if (command==='edit') {if(!on)fail('Harness is off.');const [id,status,...words]=args;const text=textOf(words);if(!id||!['agreed','assumed','open','rejected'].includes(status)||!text)fail('Usage: edit <id> <status> <text|->');const {item,error}=findItem(state,id);if(error)fail(error);const was=item.status;item.status=status;item.text=text;item.updated=Date.now();item.by=by;log({action:'edit',id:item.id,status,was,text});save(state,cwd,session);console.log('Item updated.');}
+  else if (command==='note') {if(!on)fail('Harness is off.');const [id,...words]=args;const text=textOf(words);if(!id||!text)fail('Usage: note <id> <text|->');const {item,error}=findItem(state,id);if(error)fail(error);item.notes=[...(item.notes||[]),{at:Date.now(),by,text}];item.updated=Date.now();log({action:'note',id:item.id,status:item.status,text:item.text,note:text});save(state,cwd,session);console.log('Note added.');}
+  else if (command==='remove') {if(!on)fail('Harness is off.');const {item,error}=findItem(state,args[0]);if(error)fail(error);state.items=state.items.filter(x=>x!==item);log({action:'remove',id:item.id,status:item.status,text:item.text});save(state,cwd,session);console.log('Item removed.');}
   else if(command==='status-json'){console.log(JSON.stringify(state,null,2));}
   else fail(`Unknown command: ${command}`);
 }

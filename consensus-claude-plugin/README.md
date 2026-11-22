@@ -47,6 +47,8 @@ node /absolute/path/to/consensus-claude-plugin/scripts/state.mjs on
 node /absolute/path/to/consensus-claude-plugin/scripts/state.mjs add agreed "We will build a local-first plugin"
 ```
 
+Statuses: `agreed`, `assumed`, `open`, and `rejected` (the user said no; Claude won't act on it or propose it again). `note <id> -` attaches a follow-up or constraint to an item.
+
 Pass `-` instead of the text to read it from stdin. Claude is told to always do this with a quoted heredoc (`add agreed - <<'EOF'`), so `$(...)`, backticks or `$VAR` in your words are stored as written and never run by the shell. `edit` and `remove` accept the short id shown in brackets (any unique prefix of 4+ characters).
 
 The state is saved under `~/.consensus-harness/projects/<hash>.json`, keyed by the project folder: `CONSENSUS_PROJECT` if set, else `CLAUDE_PROJECT_DIR`, else the nearest git root above the current directory, else the current directory. The hook passes `CONSENSUS_PROJECT` explicitly in the command it shows Claude, so running the CLI from a subfolder still hits the same state. Sessions started in your home folder (or `/`) are not a project, so there each session gets its own state under `~/.consensus-harness/sessions/`, keyed by session id. It survives `--resume` and compaction, starts fresh after `/clear`, and is deleted after 30 days without use. The on/off switch for the home folder still applies to all of those sessions. To override location, set `CONSENSUS_HOME`. It is not written into your project repository. Be careful with sensitive project decisions: they persist on disk.
@@ -59,6 +61,10 @@ The state is saved under `~/.consensus-harness/projects/<hash>.json`, keyed by t
 - The `consensus` skill describes how Claude can update state through the local state CLI.
 - The hook **does not** guarantee automatic agreement detection or enforce model behavior. Initial agreement extraction relies on Claude invoking its tools appropriately; test this before relying on it.
 - `off` disables future hook injection but cannot erase context already injected within the current running session. Start a fresh Claude session for complete isolation.
+
+## Changes made in the viewer
+
+The Consensus viewer (`consensus-viz/`) writes through the same state script with `CONSENSUS_BY=user`. Such items carry `by: "user"` and show to Claude as "set by the user in the viewer", and the next prompt in each session lists what the user changed since Claude's last reply, so Claude acts on it instead of asking again or reverting it. Every add/edit/remove is also kept in a short `events` log in the state file (last 30).
 
 ## Requirements
 

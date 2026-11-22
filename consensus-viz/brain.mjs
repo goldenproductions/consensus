@@ -40,12 +40,12 @@ for (let i = 0; i < argv.length; i++) {
 
 // ---------- palette ----------
 const C = {
-  agreed: [94, 234, 212], open: [251, 191, 36], assumed: [196, 181, 253],
-  goal: [241, 245, 249], mesh: [90, 108, 150], spark: [186, 230, 253], ghost: [248, 113, 113],
+  agreed: [94, 234, 212], open: [251, 191, 36], assumed: [196, 181, 253], rejected: [244, 114, 140],
+  goal: [241, 245, 249], mesh: [90, 108, 150], spark: [186, 230, 253], ghost: [150, 150, 160],
   text: [203, 213, 225], dim: [100, 116, 139], off: [120, 120, 130],
 };
-const GLYPH = {agreed: '●', open: '◆', assumed: '○'};
-const RANK = {agreed: 0, open: 1, assumed: 2};
+const GLYPH = {agreed: '●', open: '◆', assumed: '○', rejected: '✕'};
+const RANK = {agreed: 0, open: 1, assumed: 2, rejected: 3};
 const FRESH_MS = 6000;
 
 // ---------- small helpers ----------
@@ -84,7 +84,7 @@ function listStates() {
 function readJSON(file) { try { const s = JSON.parse(fs.readFileSync(file, 'utf8')); return Array.isArray(s.items) ? s : null; } catch { return null; } }
 
 const model = {file: null, mtime: 0, state: null, nodes: new Map(), goal: '', goalChanged: -1e12, pinned: !!opt.project, first: true,
-  sel: null, order: [], confirmX: 0, msg: null, offset: 0, pages: [], pageCount: 0};
+  sel: null, order: [], confirmX: 0, msg: null, offset: 0, pages: [], pageCount: 0, input: null};
 
 function pickFile() {
   const all = listStates();
@@ -112,7 +112,7 @@ function load(pick, now) {
       n = {id: it.id, seed: hash(it.id), a: null, born: model.first ? now + i * 110 : now, changed: -1e12, removed: null};
       model.nodes.set(it.id, n);
     } else if (n.status !== status || n.text !== text || n.removed !== null) n.changed = now;
-    Object.assign(n, {status, text, order: i, removed: null, time: Number(it.updated || it.at) || 0});
+    Object.assign(n, {status, text, order: i, removed: null, time: Number(it.updated || it.at) || 0, notes: Array.isArray(it.notes) ? it.notes : []});
   });
   for (const n of model.nodes.values()) if (!seen.has(n.id) && n.removed === null) n.removed = now;
   const goal = String(st.goal || '');
@@ -213,14 +213,15 @@ const HELP = [ // what each status means for you and Claude, not how it is drawn
   ['◆', C.open, 'open', 'Still to be decided. Neither of you should treat it as settled.'],
   ['○', C.assumed, 'assumed', "Claude's own interpretation, not confirmed by you. Agree it, or correct Claude."],
   ['◉', C.goal, 'goal', 'What the work is for. ◌ means no goal is agreed yet.'],
+  ['✕', C.rejected, 'rejected', "You said no. Claude won't act on it or propose it again."],
   ['●', C.spark, 'bright', 'New or just changed.'],
-  ['×', C.ghost, 'red', 'Just removed.'],
+  ['·', C.ghost, 'fading', 'Just removed: forgotten, as if it was never there.'],
   ['●', C.off, 'all grey', "Harness is off. Claude isn't using the consensus."],
 ];
 // The four things a new user needs, shown first in the ? overlay.
 const HOWTO = [
   'Talk with Claude as usual. Goal and decisions land here.',
-  "○ is Claude's assumption. Check it: ↓ to select, a to agree.",
+  "○ is Claude's assumption. ↓ select it: a agree, d disagree, n note.",
   '● agreed is what Claude works from. ◆ open is undecided.',
   'Your changes here reach Claude with your next message.',
 ];
@@ -236,7 +237,7 @@ function drawHelp(S, W, H) {
     else { rows.push({kind: 'item', g, col, name, text: ''}); wrap(desc, descW).forEach(l => rows.push({kind: 'item', text: l})); }
   }
   rows.push({kind: 'plain', text: ''});
-  for (const l of wrap('↑↓ select, then a agree · o open · x remove (twice) · ←→ newer/older page · g newest · tab next consensus · p pin · m mesh · ? / esc close · q quit', boxW - 4)) rows.push({kind: 'plain', text: l});
+  for (const l of wrap('↑↓ select, then a agree · d disagree · o open · n note · x x forget it · ←→ newer/older page · g newest · tab next consensus · p pin · m mesh · ? / esc close · q quit', boxW - 4)) rows.push({kind: 'plain', text: l});
   const boxH = Math.min(H - 2, rows.length + 3), x0 = Math.max(0, Math.floor((W - boxW) / 2)), y0 = Math.max(0, Math.floor((H - boxH) / 2));
   const border = C.dim, blank = ' '.repeat(Math.max(0, boxW - 2));
   S.text(x0, y0, '╭' + '─'.repeat(boxW - 2) + '╮', border);
@@ -271,7 +272,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   alive.forEach((n, i) => { n.idx = i + 1; n.rank = i; });
   // focus: the two newest items at full strength, older ones fade step by step
   const focus = n => n.removed !== null || !(n.rank > 1) ? 1 : Math.max(0.4, 1 - (n.rank - 1) * 0.09);
-  const counts = {agreed: 0, open: 0, assumed: 0};
+  const counts = {agreed: 0, open: 0, assumed: 0, rejected: 0};
   alive.forEach(n => counts[n.status]++);
   const fresh = n => now - Math.max(n.born, n.changed) < FRESH_MS && now >= n.born;
 
@@ -282,6 +283,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   const tail = (off ? 'OFF' : '') + (off && W >= 44 ? '  ' : '') + (W >= 44 ? age : '');
   const named = W >= 60; // legend: wide panes name each colour, narrow ones show only the symbols
   const parts = [[`● ${counts.agreed}${named ? ' agreed' : ''}`, C.agreed], [`◆ ${counts.open}${named ? ' open' : ''}`, C.open], [`○ ${counts.assumed}${named ? ' assumed' : ''}`, C.assumed]];
+  if (counts.rejected) parts.push([`✕ ${counts.rejected}${named ? ' rejected' : ''}`, C.rejected]);
   const rightLen = parts.reduce((a, [s]) => a + [...s].length + 2, 0) + (tail ? [...tail].length + 1 : 0);
   let rx0 = W - rightLen;
   for (const [txt, col] of parts) { S.text(rx0, y, txt, tone(col), true); rx0 += [...txt].length + 2; }
@@ -304,12 +306,17 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   // footer
   const hintRow = H - 1;
   const hint = model.sel
-    ? (W >= 70 ? 'a agree · o open · x remove · ↑↓ move · esc done' : W >= 34 ? 'a · o · x · ↑↓ · esc' : 'esc')
+    ? (W >= 84 ? 'a agree · d disagree · o open · n note · x forget · esc done' : W >= 40 ? 'a · d · o · n · x · esc' : 'esc')
     : (W >= 72 ? 'q quit · ↑↓ select · ←→ newer/older · ? help' : W >= 40 ? 'q · ↑↓ · ←→ · ? help' : '? help');
-  if (model.msg && Date.now() < model.msg.until) S.text(1, hintRow, truncate(model.msg.text, W - 20), model.msg.col, true);
+  if (model.input) {
+    const label = model.input.label || 'note: ', room = Math.max(4, W - label.length - 4), txt = [...model.input.text];
+    S.text(1, hintRow, label, C.open, true);
+    S.text(1 + label.length, hintRow, (txt.length > room ? '…' + txt.slice(-room + 1).join('') : model.input.text) + '▌', C.goal, true);
+  }
+  else if (model.msg && Date.now() < model.msg.until) S.text(1, hintRow, truncate(model.msg.text, W - 20), model.msg.col, true);
   else S.text(1, hintRow, hint, model.sel ? C.goal : tone(C.dim, 0.7), !!model.sel);
-  const mode = model.pinned ? 'pinned' : W >= 56 ? 'following newest' : 'follow';
-  S.text(W - mode.length - 1, hintRow, mode, tone(model.pinned ? C.open : C.dim, 0.8));
+  const mode = model.input ? 'enter save · esc cancel' : model.pinned ? 'pinned' : W >= 56 ? 'following newest' : 'follow';
+  if (!model.input || W >= 60) S.text(W - mode.length - 1, hintRow, mode, tone(model.input ? C.open : model.pinned ? C.open : C.dim, 0.8));
   S.gy = y; S.gh = Math.max(0, hintRow - y);
   if (S.gh < 3) return S.render(color, rowPrefix);
 
@@ -328,7 +335,9 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   const pack = start => {
     const used = {right: 0, left: 0}, out = [];
     for (let i = start; i < alive.length; i++) {
-      const lines = wrap(alive[i].text, tw);
+      const textLines = wrap(alive[i].text, tw);
+      const lines = textLines.concat(...alive[i].notes.map(nt => wrap('↳ ' + nt.text, tw)));
+      alive[i].textLines = textLines.length;
       const side = !two || used.right <= used.left ? 'right' : 'left';
       const gap = used[side] ? 1 : 0;
       if (used[side] + gap + lines.length > rowsAvail) {
@@ -395,7 +404,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
     const grow = n.removed !== null ? 1 : easeOut(clamp((now - n.born) / 700, 0, 1));
     const ghostK = n.removed !== null ? 1 - (now - n.removed) / 1600 : 1;
     const col = n.removed !== null ? C.ghost : C[n.status];
-    const every = n.status === 'assumed' || n.removed !== null ? 2 : 1;
+    const every = n.status === 'assumed' || n.status === 'rejected' || n.removed !== null ? 2 : 1;
     const base = (n.removed !== null ? 0.4 : n.status === 'agreed' ? 0.55 : 0.42) * focus(n);
     for (let s = 0; s <= steps * grow; s += every) {
       const [px, py] = f(s / steps);
@@ -439,7 +448,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   // nodes and their full text
   for (const n of ghosts) if (n.last) {
     const c = Math.floor(n.last[0] / 2), r = S.gy + Math.floor(n.last[1] / 4);
-    if (r < S.gy + S.gh) S.text(c, r, '×', C.ghost.map(v => v * (1 - (now - n.removed) / 1600)), true);
+    if (r < S.gy + S.gh) S.text(c, r, '·', C.ghost.map(v => v * (1 - (now - n.removed) / 1600)), true);
   }
   for (const n of placed) {
     const {side, c, r} = n.cell, f = fresh(n);
@@ -447,7 +456,8 @@ function frame(now, W, H, color = true, rowPrefix = null) {
     S.text(c, r, GLYPH[n.status], tone(f ? mix(C[n.status], C.goal, 0.4) : C[n.status], pulse * Math.max(0.55, focus(n))), true);
     const sel = n.id === model.sel;
     const tcol = sel ? C.goal : tone(f ? mix(C[n.status], C.goal, 0.55) : mix(C[n.status], C.text, 0.55), f ? 1 : 0.95 * focus(n));
-    n.lines.forEach((l, i) => { S.text(side === 'left' ? 1 : c + 2, r + i, l, tcol, f || sel || n.rank === 0); if (side === 'right') S.text(c + 1, r + i, ' ', null); });
+    const ncol = tone(mix(C.goal, C.dim, 0.35), Math.max(0.6, focus(n)));
+    n.lines.forEach((l, i) => { const isNote = i >= (n.textLines || n.lines.length); S.text(side === 'left' ? 1 : c + 2, r + i, l, isNote ? ncol : tcol, !isNote && (f || sel || n.rank === 0)); if (side === 'right') S.text(c + 1, r + i, ' ', null); });
     if (sel) S.text(side === 'left' ? c + 1 : c - 1, r, side === 'left' ? '◂' : '▸', C.goal, true);
     if (side === 'left') { // dotted leader from the end of the first line to the node
       const from = (1 + [...n.lines[0]].length) * 2 + 2, py = (r - S.gy) * 4 + 2;
@@ -476,22 +486,33 @@ function move(d) {
   if (i < 0) { const vis = o.slice(model.offset); model.sel = vis.slice(0, model.pageCount).find(id => model.nodes.get(id)?.status === 'assumed') || vis[0] || o[0]; return; }
   model.sel = o[(i + d + o.length) % o.length];
 }
+function runState(st, args, input) {
+  const env = {...process.env, CONSENSUS_PROJECT: st.project, CONSENSUS_BY: 'user'}; // tells Claude this was your decision
+  if (st.session) env.CONSENSUS_SESSION = String(st.session); else delete env.CONSENSUS_SESSION;
+  execFileSync(process.execPath, [STATE_CLI, ...args], {env, input, stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000});
+  lastPoll = 0;
+}
+function addNote(text) {
+  const st = model.state, n = model.sel && model.nodes.get(model.sel);
+  if (!st || !n) return;
+  if (!fs.existsSync(STATE_CLI)) return say('state script not found: set CONSENSUS_STATE_CLI', C.ghost);
+  try { runState(st, ['note', n.id, '-'], text); say('↳ note added', C.open); }
+  catch (e) { say(String(e.stderr || e.message).trim().split('\n')[0] || 'write failed', C.ghost); }
+}
 function act(kind) {
   const st = model.state, n = model.sel && model.nodes.get(model.sel);
   if (!st || !n) return;
   if (st.enabled === false) return say('harness is off: nothing changed', C.ghost);
   if (kind === n.status) return say(`already ${kind}`, C[kind]);
   if (!fs.existsSync(STATE_CLI)) return say('state script not found: set CONSENSUS_STATE_CLI', C.ghost);
-  if (kind === 'remove' && Date.now() - model.confirmX > 2500) { model.confirmX = Date.now(); return say('press x again to remove this item', C.open); }
+  if (kind === 'remove' && Date.now() - model.confirmX > 2500) { model.confirmX = Date.now(); return say('press x again to forget this item (to say no, use d)', C.open); }
   model.confirmX = 0;
-  const env = {...process.env, CONSENSUS_PROJECT: st.project};
-  if (st.session) env.CONSENSUS_SESSION = String(st.session); else delete env.CONSENSUS_SESSION;
   const args = kind === 'remove' ? ['remove', n.id] : ['edit', n.id, kind, '-'];
   try {
-    execFileSync(process.execPath, [STATE_CLI, ...args], {env, input: n.text, stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000});
+    runState(st, args, n.text);
     if (kind === 'remove') { const o = model.order, i = o.indexOf(n.id); model.sel = o[i + 1] || o[i - 1] || null; }
-    say(kind === 'remove' ? '× removed' : `${GLYPH[kind]} marked ${kind}`, kind === 'remove' ? C.ghost : C[kind]);
-    lastPoll = 0;
+    say(kind === 'remove' ? '· forgotten' : `${GLYPH[kind]} marked ${kind}`, kind === 'remove' ? C.ghost : C[kind]);
+    return true;
   } catch (e) { say(String(e.stderr || e.message).trim().split('\n')[0] || 'write failed', C.ghost); }
 }
 
@@ -519,6 +540,14 @@ if (process.stdin.isTTY) {
   process.stdin.resume();
   process.stdin.on('data', d => {
     const k = d.toString();
+    if (model.input) { // typing a note: enter saves, esc cancels
+      if (k === '\x03') process.exit(0);
+      else if (k === '\x1b') model.input = null;
+      else if (k === '\r' || k === '\n') { const t = model.input.text.trim(); model.input = null; if (t) addNote(t); }
+      else if (k === '\x7f' || k === '\b') model.input.text = [...model.input.text].slice(0, -1).join('');
+      else if (!k.startsWith('\x1b')) model.input.text += k.replace(/[\x00-\x1f\x7f]/g, ' ');
+      return;
+    }
     if (k === '?') opt.help = !opt.help;
     else if (k === '\x1b' && opt.help) opt.help = false;
     else if (k === '\x1b' && model.sel) model.sel = null;
@@ -531,6 +560,8 @@ if (process.stdin.isTTY) {
     else if (model.sel && k === 'a') act('agreed');
     else if (model.sel && k === 'o') act('open');
     else if (model.sel && k === 'x') act('remove');
+    else if (model.sel && k === 'd') { if (act('rejected')) model.input = {text: '', label: 'why? (optional): '}; }
+    else if (model.sel && k === 'n') { if (model.state?.enabled === false) say('harness is off: nothing changed', C.ghost); else model.input = {text: ''}; }
     else if (k === 'm') opt.mesh = !opt.mesh;
     else if (k === 'p') { model.pinned = !model.pinned; lastPoll = 0; }
     else if (k === '\t') {
