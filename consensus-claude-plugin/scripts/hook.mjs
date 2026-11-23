@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import {fileURLToPath} from 'node:url';
 import {load, resolveProject, isSharedDir, pruneSessions, getPaths, readSeen, markSeen, eventLine} from './state.mjs';
 import {archive, migrateFolderState, renderMemory} from './memory.mjs';
 const chunks=[];
@@ -42,14 +43,33 @@ const workingId=state.working?.id;
 const brief=shown.map(x=>`- ${x.status.toUpperCase()}${x.id===workingId?' (you are working on this)':''}${x.first?' (ask first)':''}${x.by==='user'?' (set by the user in the viewer)':''} {${x.topic||'no topic'}} [${x.id.slice(0,8)}]: ${x.text}${noteLines(x)}`).join('\n')
   +(hidden.length?`\n- +${hidden.length} more not shown (${counts}); run status-json to see them`:'');
 // Pin the project explicitly so the CLI hits the same state file even if the shell has cd'd elsewhere.
-const cli=`CONSENSUS_PROJECT="${project}"${session?` CONSENSUS_SESSION="${session}"`:''} node "${process.env.CLAUDE_PLUGIN_ROOT || ''}/scripts/state.mjs"`;
-const usage=`State manager, run via Bash as: ${cli} <command>
+// Commands in the syntax of the shell the agent actually uses: Codex on Windows runs PowerShell, everything else
+// (Claude Code everywhere, including its Git Bash on Windows; Codex on Linux/macOS) runs a POSIX shell.
+// CONSENSUS_SHELL=powershell|bash overrides the guess.
+const stateCli=path.join(path.dirname(fileURLToPath(import.meta.url)),'state.mjs');
+const isCodex=/[\\/]\.codex[\\/]/.test(String(input.transcript_path||''))||(process.env.CODEX_HOME&&String(input.transcript_path||'').startsWith(process.env.CODEX_HOME));
+const shell=(process.env.CONSENSUS_SHELL||(process.platform==='win32'&&isCodex?'powershell':'bash')).toLowerCase().startsWith('p')?'powershell':'bash';
+let usage;
+if(shell==='powershell'){
+  const q=v=>`'${String(v).replace(/'/g,"''")}'`;
+  const env=`$env:CONSENSUS_PROJECT=${q(project)}; ${session?`$env:CONSENSUS_SESSION=${q(session)}; `:''}$OutputEncoding=[Text.Encoding]::UTF8;`;
+  const cli=`node ${q(stateCli)}`;
+  usage=`State manager, run in PowerShell as: ${env} ${cli} <command>
+Commands: goal - | why - | gist - | add <agreed|assumed|open> --topic "<Topic>" [--first] - | go | work <id> | edit <id> <agreed|assumed|open|rejected> - | topic <id> "<Topic>" | remove <id> | status-json (full state). <id> is the short id in brackets above or the full id.
+"-" reads the text from stdin. Always pipe the text in from a single-quoted here-string (@' on its own line, '@ at the very start of a line) so PowerShell never expands the user's words, e.g.:
+${env} @'
+<text>
+'@ | ${cli} add agreed -`;
+}else{
+  const q=v=>`'${String(v).replace(/'/g,"'\\''")}'`;
+  const cli=`CONSENSUS_PROJECT=${q(project)}${session?` CONSENSUS_SESSION=${q(session)}`:''} node ${q(stateCli)}`;
+  usage=`State manager, run via Bash as: ${cli} <command>
 Commands: goal - | why - | gist - | add <agreed|assumed|open> --topic "<Topic>" [--first] - | go | work <id> | edit <id> <agreed|assumed|open|rejected> - | topic <id> "<Topic>" | remove <id> | status-json (full state). <id> is the short id in brackets above or the full id.
 "-" reads the text from stdin. Always pass text through a quoted heredoc so the shell never expands the user's words, e.g.:
 ${cli} add agreed - <<'EOF'
 <text>
 EOF`;
-const scope=session?(isSharedDir(project)?' (this session; started in the home folder)':' (this session)'):'';
+}const scope=session?(isSharedDir(project)?' (this session; started in the home folder)':' (this session)'):'';
 const current=`Current goal${scope}: ${state.goal || '(not yet agreed)'}\nWhy (the problem it solves): ${state.why || '(not yet agreed)'}\n${brief || 'No consensus recorded yet.'}`;
 // Soft clarify gate: while the goal, the why or "ask first" questions are unsettled, push for questions before building. Never blocks.
 const firsts=state.items.filter(x=>x.first&&x.status==='open');

@@ -62,7 +62,7 @@ function fail(message){console.error(message);process.exit(1)}
 // Text is the remaining args joined, or stdin when the only arg is "-".
 // Claude passes user wording through a quoted heredoc (<<'EOF') so the shell never expands $(...) or backticks in it.
 function textOf(words){
-  if (words.length===1 && words[0]==='-') { try { return fs.readFileSync(0,'utf8').trim(); } catch { return ''; } }
+  if (words.length===1 && words[0]==='-') { try { return fs.readFileSync(0,'utf8').replace(/^\uFEFF/,'').replace(/\r\n/g,'\n').trim(); } catch { return ''; } } // PowerShell pipes may add a BOM and CRLF
   return words.join(' ').trim();
 }
 // When this session last got the consensus (its last prompt, or the last auto-wake): viewer changes after it are new to the AI.

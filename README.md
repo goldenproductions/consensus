@@ -36,7 +36,7 @@ codex plugin marketplace add https://github.com/goldenproductions/consensus
 codex plugin add consensus@consensus
 ```
 
-Codex also needs the state folder writable from its sandbox; see [the plugin README](consensus-claude-plugin/README.md#codex). Node.js 20+ is the only requirement.
+On Windows PowerShell use `codex.cmd` instead of `codex`. Codex also needs the state folder writable from its sandbox; see [the plugin README](consensus-claude-plugin/README.md#codex). Node.js 20+ is the only requirement.
 
 ## License
 

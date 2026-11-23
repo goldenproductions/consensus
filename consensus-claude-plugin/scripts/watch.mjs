@@ -35,7 +35,7 @@ if (!enabled() || autoWakeOff()) process.exit(0);
 
 // Codex would wait for this hook, so run the watcher as a detached process and return at once.
 if (isCodex && !isChild) {
-  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--child', JSON.stringify(input)], {detached: true, stdio: 'ignore', env: process.env});
+  const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--child', JSON.stringify(input)], {detached: true, stdio: 'ignore', env: process.env, windowsHide: true});
   child.unref();
   process.exit(0);
 }
@@ -44,6 +44,22 @@ const start = Date.now();
 const activity = () => { try { return JSON.parse(fs.readFileSync(path.join(root, 'activity', `${safe}.json`), 'utf8')); } catch { return {}; } };
 const typing = () => { try { return Date.now() - fs.statSync(path.join(root, 'typing', safe)).mtimeMs < TYPING_MS; } catch { return false; } };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+// Failures are logged (never shown to the AI), so a wake that couldn't be delivered can be diagnosed.
+const logFail = msg => { try { fs.mkdirSync(path.join(root, 'logs'), {recursive: true}); fs.appendFileSync(path.join(root, 'logs', 'watch.log'), `${new Date().toISOString()} ${session} ${msg}\n`); } catch {} };
+// How to run codex without a shell: on Windows npm installs a codex.cmd launcher that execFile can't run,
+// so use codex.exe if there is one, else the npm package's JS entry point through Node. CONSENSUS_CODEX overrides.
+function codexCommand() {
+  if (process.env.CONSENSUS_CODEX) return [process.env.CONSENSUS_CODEX, []];
+  if (process.platform !== 'win32') return ['codex', []];
+  const dirs = String(process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  for (const d of dirs) { const exe = path.join(d, 'codex.exe'); if (fs.existsSync(exe)) return [exe, []]; }
+  for (const d of dirs) {
+    if (!fs.existsSync(path.join(d, 'codex.cmd'))) continue;
+    for (const js of [path.join(d, 'node_modules', '@openai', 'codex', 'bin', 'codex.js'), path.join(d, '..', 'node_modules', '@openai', 'codex', 'bin', 'codex.js')])
+      if (fs.existsSync(js)) return [process.execPath, [js]];
+  }
+  return ['codex.exe', []];
+}
 
 while (Date.now() - start < LIFETIME_MS) {
   await sleep(TICK_MS);
@@ -61,7 +77,9 @@ while (Date.now() - start < LIFETIME_MS) {
   markSeen(project, session);
   const msg = `The user just changed the consensus in the Consensus viewer (no chat message). These are the user's own decisions: acknowledge them in one short line, act on them if they unblock or change your work, and do not ask about them again or revert them:\n${evs.map(eventLine).join('\n')}`;
   if (isCodex) {
-    try { execFileSync('codex', ['queue', '--thread', session, '--message', msg], {stdio: 'ignore', timeout: 30000}); } catch {}
+    const [cmd, pre] = codexCommand();
+    try { execFileSync(cmd, [...pre, 'queue', '--thread', session, '--message', msg], {stdio: ['ignore', 'ignore', 'pipe'], timeout: 30000, windowsHide: true}); }
+    catch (e) { logFail(`codex queue failed (${cmd}): ${String(e.stderr || e.message).trim().split('\n')[0]}`); }
     process.exit(0);
   }
   process.stderr.write(msg + '\n');

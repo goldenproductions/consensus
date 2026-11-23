@@ -55,6 +55,24 @@ hooks = true
 writable_roots = ["/home/<you>/.consensus-harness"]
 ```
 
+### Codex on Windows
+
+In Windows PowerShell, type `codex.cmd` instead of `codex`: the npm install also puts a `codex.ps1` on the PATH, which PowerShell's default execution policy blocks.
+
+```powershell
+codex.cmd plugin marketplace add https://github.com/goldenproductions/consensus
+codex.cmd plugin add consensus@consensus
+```
+
+The sandbox rule takes a Windows path (a TOML literal string, so backslashes need no escaping):
+
+```toml
+[sandbox_workspace_write]
+writable_roots = ['C:\Users\<you>\.consensus-harness']
+```
+
+Codex on Windows runs commands in PowerShell, so the plugin tells it the PowerShell form of the state commands (`$env:` variables and a single-quoted here-string piped to `node`). Claude Code, including on Windows (Git Bash), gets the Bash form. Set `CONSENSUS_SHELL=powershell` or `bash` to override. Auto-wake finds `codex.exe` or the npm package's `codex.js` itself; set `CONSENSUS_CODEX` to the codex executable if it can't, and see `~/.consensus-harness/logs/watch.log` when a wake doesn't arrive.
+
 Start `codex` and choose **Trust all and continue** when it asks to review the new hooks (or review them with `/hooks`). Codex asks again whenever the hooks change. Turn consensus on per folder with `node consensus-claude-plugin/scripts/state.mjs on` from that folder. After changing the plugin, bump the version and run `codex plugin add consensus@consensus` again. The unslop companion is Claude Code only.
 
 ## Companion plugin: unslop
