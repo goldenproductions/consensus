@@ -28,6 +28,10 @@ Why: Dad's photos sit on an old hard drive and nobody sees them
 
 You said "static", not "Astro", so Astro stays an assumption until you confirm it. The audience question is still open, so the AI asks again before it depends on it. Stock photos won't be proposed again. Next session, the AI starts from this instead of from scratch.
 
+The same story in the viewer: the AI records the consensus, you reject stock photos, agree to Astro, answer the open question, and the AI goes to work on what you agreed.
+
+![The Consensus viewer: items appear as the AI records them, the user rejects one, agrees to another and answers the open question, then the AI starts editing](docs/consensus-viewer.gif)
+
 ## What it does
 
 - **Agreed, assumed, open, rejected.** Agreed items are kept in your words. Everything the AI decides on its own is marked assumed until you confirm it.
