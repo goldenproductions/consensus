@@ -4,6 +4,7 @@
 // Labels come from the tool's own user-facing description or a file name, never from command text.
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import {load, resolveProject, getPaths} from './state.mjs';
 
 const chunks = [];
@@ -11,6 +12,15 @@ for await (const chunk of process.stdin) chunks.push(chunk);
 let input = {};
 try { input = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch { process.exit(0); }
 const session = String(input.session_id || '');
+// CONSENSUS_DEBUG_HOOKS=1: append every raw hook event (minus tool input bodies) to logs/hooks.jsonl, to see what an agent sends.
+if (process.env.CONSENSUS_DEBUG_HOOKS === '1') {
+  try {
+    const {tool_input, ...rest} = input;
+    const dir = path.join(process.env.CONSENSUS_HOME || path.join(os.homedir(), '.consensus-harness'), 'logs');
+    fs.mkdirSync(dir, {recursive: true});
+    fs.appendFileSync(path.join(dir, 'hooks.jsonl'), JSON.stringify({at: Date.now(), ...rest, tool_input_keys: tool_input ? Object.keys(tool_input) : undefined}) + '\n');
+  } catch {}
+}
 if (!session) process.exit(0);
 const project = resolveProject(input.cwd || process.cwd());
 try { if (!load(project).enabled) process.exit(0); } catch { process.exit(0); }

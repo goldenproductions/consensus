@@ -55,7 +55,7 @@ if(shell==='powershell'){
   const env=`$env:CONSENSUS_PROJECT=${q(project)}; ${session?`$env:CONSENSUS_SESSION=${q(session)}; `:''}$OutputEncoding=[Text.Encoding]::UTF8;`;
   const cli=`node ${q(stateCli)}`;
   usage=`State manager, run in PowerShell as: ${env} ${cli} <command>
-Commands: goal - | why - | gist - | add <agreed|assumed|open> --topic "<Topic>" [--first] - | go | work <id> | edit <id> <agreed|assumed|open|rejected> - | topic <id> "<Topic>" | remove <id> | status-json (full state). <id> is the short id in brackets above or the full id.
+Commands: goal - | why - | gist - | add <agreed|assumed|open> --topic "<Topic>" [--first] - | go | work <id> | edit <id> <agreed|assumed|open|rejected> - | topic <id> "<Topic>" | retopic "<Old>" "<New>" | remove <id> | status-json (full state). <id> is the short id in brackets above or the full id.
 "-" reads the text from stdin. Always pipe the text in from a single-quoted here-string (@' on its own line, '@ at the very start of a line) so PowerShell never expands the user's words, e.g.:
 ${env} @'
 <text>
@@ -64,13 +64,16 @@ ${env} @'
   const q=v=>`'${String(v).replace(/'/g,"'\\''")}'`;
   const cli=`CONSENSUS_PROJECT=${q(project)}${session?` CONSENSUS_SESSION=${q(session)}`:''} node ${q(stateCli)}`;
   usage=`State manager, run via Bash as: ${cli} <command>
-Commands: goal - | why - | gist - | add <agreed|assumed|open> --topic "<Topic>" [--first] - | go | work <id> | edit <id> <agreed|assumed|open|rejected> - | topic <id> "<Topic>" | remove <id> | status-json (full state). <id> is the short id in brackets above or the full id.
+Commands: goal - | why - | gist - | add <agreed|assumed|open> --topic "<Topic>" [--first] - | go | work <id> | edit <id> <agreed|assumed|open|rejected> - | topic <id> "<Topic>" | retopic "<Old>" "<New>" | remove <id> | status-json (full state). <id> is the short id in brackets above or the full id.
 "-" reads the text from stdin. Always pass text through a quoted heredoc so the shell never expands the user's words, e.g.:
 ${cli} add agreed - <<'EOF'
 <text>
 EOF`;
 }const scope=session?(isSharedDir(project)?' (this session; started in the home folder)':' (this session)'):'';
-const current=`Current goal${scope}: ${state.goal || '(not yet agreed)'}\nWhy (the problem it solves): ${state.why || '(not yet agreed)'}\n${brief || 'No consensus recorded yet.'}`;
+// The topics in use, so new items reuse them instead of each getting its own.
+const topicCounts=new Map();for(const x of state.items)if(x.topic)topicCounts.set(x.topic,(topicCounts.get(x.topic)||0)+1);
+const topicsLine=topicCounts.size?`\nTopics (reuse one; keep to about 3-6${topicCounts.size>6?`; there are ${topicCounts.size} now, merge related ones with retopic`:''}): ${[...topicCounts].sort((a,b)=>b[1]-a[1]).map(([t,n])=>`${t} ${n}`).join(', ')}`:'';
+const current=`Current goal${scope}: ${state.goal || '(not yet agreed)'}\nWhy (the problem it solves): ${state.why || '(not yet agreed)'}\n${brief || 'No consensus recorded yet.'}${topicsLine}`;
 // Soft clarify gate: while the goal, the why or "ask first" questions are unsettled, push for questions before building. Never blocks.
 const firsts=state.items.filter(x=>x.first&&x.status==='open');
 // After "go", stop nudging about the goal and why; a new ask-first question turns the nudge back on.
@@ -92,7 +95,7 @@ const guidance=`Consensus is enabled for this project. Conversational working ag
 - REJECTED items: the user said no. Do not act on them or propose them again; if you need something in their place, propose an alternative. A user note under it usually says why.
 - "user note" lines under an item are the user's follow-ups or constraints, often a partial agreement: respect them, adjust the item or your plan, and answer any question in them. Keep the item's status unless the user changed it.
 - Items marked "set by the user in the viewer" were changed by the user directly in the Consensus viewer. They are the user's explicit decision: do not revert them, do not ask about them again, act on them.
-- Give every item a short topic (1-2 words, like "Viewer" or "Memory") with --topic; the viewer groups items by it. Reuse the topic names shown in braces; start a new topic when the conversation moves to a new subject. Give items marked {no topic} one with the topic command when you touch them.
+- Give every item a topic with --topic: a broad area of the work (1-2 words, like "Viewer" or "Memory"), not the subject of one decision. Keep a session to about 3-6 topics: always reuse a topic from the "Topics" line when the item fits one even loosely, and start a new topic only when the conversation moves to a clearly different area. When topics have multiplied, merge them with "retopic <old> <new>". Give items marked {no topic} one with the topic command when you touch them.
 - Clarify before building (soft gate): on a vague or open request, think critically and ask before you spend effort guessing. Agree the goal and the why (the problem it solves; set with "why -") first, and ask the 1-3 questions that would most change what you build (e.g. stack, audience, scope), each with your recommendation; record them with add open --first. It is better to ask one sharp question than to build something the user then has to throw away. Do not over-ask: clear, small or easily reversible tasks need no questions. "go" from the user (or GO from the viewer) means proceed on your recommendations; record them as assumed.
 - Link your work to the decisions: before you edit files, run "work <id>" with the agreed item the edits carry out (add the item first if none fits), and run it again when the work moves to another item. File edits are then traced to that item, so the user sees which files each decision touched and spots work that is not based on an agreed decision. Do not build on a REJECTED item; building on an open or assumed one is shown to the user as unconfirmed.
 - Keep a gist: 1-3 lines on the overall consensus (the direction, not details), set with "gist -". Update it when the direction changes, not every turn. It is what future sessions in this project will remember; saving is automatic.
