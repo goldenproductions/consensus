@@ -1,43 +1,64 @@
 # Consensus
 
-Shared understanding between you and your AI coding agent. Consensus keeps a live record of what you and the AI agreed: the goal, why you want it, the decisions, the AI's assumptions and the open questions. The AI works from it, asks before it builds on guesses, and you can see and change it at any time in a terminal pane beside the chat.
+A live record of what you and your AI coding agent agreed, for **Claude Code** and **Codex**.
 
-Works with **Claude Code** and **Codex**. Local-first: everything stays in `~/.consensus-harness/` on your machine, with no extra API key or model calls.
+AI agents fill gaps with guesses and build on them, so you only find out what they assumed when the result is wrong. Consensus separates what you *agreed* from what the AI *assumed*, has the AI ask before it builds on guesses, and shows all of it in a pane beside the chat where you can change it.
+
+## Demo
+
+> **You:** build me a website with images of cars
+>
+> **AI:** What's it for, and who will see it? Two questions before I build:
+> 1. Family only (private link) or public? *I'd go private.*
+> 2. Any stack? *I'd use a static Astro site, no backend.*
+>
+> **You:** it's for my dad's old car photos, they sit on a hard drive nobody looks at. static is fine, photos are in the scanned album folder
+
+The AI records what was said, and only that, as agreed. Its own picks stay assumed. It also assumed it could fill gaps with stock photos; you press `d` on that item in the viewer, and the AI takes the change without you typing in the chat. The consensus now reads:
+
+```
+Goal: A website for our family's classic car photos
+Why: Dad's photos sit on an old hard drive and nobody sees them
+1. [agreed] Static site, no backend or database
+2. [agreed] Photos come from the scanned album folder
+3. [assumed] Astro with a simple image grid
+4. [open, ask first] Private link for family only, or public?
+5. [rejected] Fill gaps with stock car photos
+```
+
+You said "static", not "Astro", so Astro stays an assumption until you confirm it. The audience question is still open, so the AI asks again before it depends on it. Stock photos won't be proposed again. Next session, the AI starts from this instead of from scratch.
 
 ## What it does
 
-- **Agreed vs. assumed.** Your decisions are saved as *agreed*, in your words. Anything the AI fills in on its own is *assumed* until you confirm it. Things you said no to stay as *rejected*, so they aren't proposed again.
-- **Ask first.** On a vague request ("build me a website with images of cars") the AI asks the 1–3 questions that matter (what problem, which stack, for whom) before spending tokens on guesses. It's a nudge, never a lock: say "go" and it proceeds on its own recommendations.
-- **Short replies.** The first line is what the AI needs from you.
-- **Memory.** Each session is compacted into per-project long-term memory automatically. Nothing to save by hand.
-- **Decisions linked to code.** File edits are traced to the decision they carry out, so you can see which files a decision touched and spot work that rests on nothing you agreed.
+- **Agreed, assumed, open, rejected.** Agreed items are kept in your words. Everything the AI decides on its own is marked assumed until you confirm it.
+- **Ask first.** On a vague request the AI asks the 1–3 questions that most change the result, each with its recommendation. It's a nudge, not a lock: say "go" and it proceeds on its picks.
+- **Memory.** Each session is compacted into per-project memory automatically.
+- **Decisions linked to code.** File edits are traced to the decision they carry out, so work that rests on nothing you agreed stands out.
 
-## The viewer: Consensus Brain
+Local-first: state lives in `~/.consensus-harness/` on your machine. No extra API key or model calls.
 
-```bash
-node consensus-viz/brain.mjs
-```
+## The viewer
 
-A live terminal view for a pane beside the chat, drawn as a small nervous system: the goal in the middle, decisions grouped by topic, the AI's activity firing through the mesh. Agree (`a`), disagree (`d`), add a note (`n`) or your own item (`+`) right there. The AI picks your change up within seconds, with no need to type in the chat. Press `?` for help. See [consensus-viz/README.md](consensus-viz/README.md).
+Type `/consensus:view` in Claude Code or Codex. The viewer opens in a pane beside the chat (herdr, tmux, WezTerm, Windows Terminal, iTerm2) or in a new window, and the command prints its own start line for running it by hand.
+
+Select an item and press `a` agree, `d` disagree, `n` note, or `+` to add your own. `?` shows all keys. More in the [viewer README](consensus-claude-plugin/viz/README.md).
 
 ## Install
 
-Claude Code:
+Requires Node.js 20+.
 
 ```bash
+# Claude Code
 claude plugin marketplace add goldenproductions/consensus
 claude plugin install consensus@consensus
-```
 
-Codex (0.171+, with `features.hooks = true`):
-
-```bash
+# Codex 0.171+ (set features.hooks = true in ~/.codex/config.toml)
 codex plugin marketplace add https://github.com/goldenproductions/consensus
 codex plugin add consensus@consensus
 ```
 
-On Windows PowerShell use `codex.cmd` instead of `codex`. Codex also needs the state folder writable from its sandbox; see [the plugin README](consensus-claude-plugin/README.md#codex). Node.js 20+ is the only requirement.
+Codex also needs `~/.consensus-harness` writable from its sandbox, and on Windows PowerShell you type `codex.cmd`. See [Codex setup](consensus-claude-plugin/README.md#codex).
 
 ## License
 
-MIT. The optional companion plugin [unslop](https://github.com/heydamir/unslop) is CC-BY-4.0 by Damir Sokolovsky and is installed from its own repository, not included here.
+MIT. The companion plugin [unslop](https://github.com/heydamir/unslop) (CC-BY-4.0, Damir Sokolovsky) is installed from its own repository, not included here.

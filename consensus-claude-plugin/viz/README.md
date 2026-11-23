@@ -80,11 +80,15 @@ The same four lines open the `?` overlay, and an empty consensus points new user
 
 ## Run
 
+Inside Claude Code or Codex: `/consensus:view`. It runs `scripts/view.mjs`, which opens the viewer in a split pane (herdr, tmux, WezTerm, Windows Terminal, iTerm2) or a new window (Terminal.app, a Windows console), and prints the command to start it by hand with the full path. Set `CONSENSUS_VIEW=print` to only print it, or `CONSENSUS_VIEW=herdr|tmux|wezterm|wt|iterm|terminal|console` to force one method.
+
+By hand, from the plugin folder (in a clone of the repo, `node consensus-viz/brain.mjs` also works and forwards here):
+
 ```bash
-node consensus-viz/brain.mjs                    # follow whichever consensus changed last
-node consensus-viz/brain.mjs --project ~/code/x # pin one project folder
-node consensus-viz/brain.mjs --no-mesh          # calmer: no background mesh
-node consensus-viz/brain.mjs --once --size 100x36   # print one frame and exit
+node viz/brain.mjs                        # follow whichever consensus changed last
+node viz/brain.mjs --project ~/code/x     # pin one project folder
+node viz/brain.mjs --no-mesh              # calmer: no background mesh
+node viz/brain.mjs --once --size 100x36   # print one frame and exit
 ```
 
 Press `?` for an overlay with the four steps below and what each status means for you and Claude (`?` or `esc` closes it).

@@ -84,6 +84,7 @@ Start `codex` and choose **Trust all and continue** when it asks to review the n
 - `/consensus:on` — enable for the project (on by default)
 - `/consensus:off` — disable for the project, preserving state
 - `/consensus:status` — inspect the shared understanding
+- `/consensus:view` — open the Consensus viewer beside the chat (split pane or new window; otherwise prints the command)
 - `/consensus:consensus` — explicitly request a consensus update
 
 If command names differ on your Claude Code version, inspect the loaded plugin via `/plugin`. You can always use the direct CLI described below.
@@ -122,7 +123,7 @@ A new session in the same project starts with that memory, newest first: the las
 
 ## Changes made in the viewer
 
-The Consensus viewer (`consensus-viz/`) writes through the same state script with `CONSENSUS_BY=user`. Such items carry `by: "user"` and show to Claude as "set by the user in the viewer", and the next prompt in each session lists what the user changed since Claude's last reply, so Claude acts on it instead of asking again or reverting it. Every add/edit/remove is also kept in a short `events` log in the state file (last 30).
+The Consensus viewer (`viz/`) writes through the same state script with `CONSENSUS_BY=user`. Such items carry `by: "user"` and show to Claude as "set by the user in the viewer", and the next prompt in each session lists what the user changed since Claude's last reply, so Claude acts on it instead of asking again or reverting it. Every add/edit/remove is also kept in a short `events` log in the state file (last 30).
 
 ## Live activity for the viewer
 
