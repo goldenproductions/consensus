@@ -1,6 +1,6 @@
 ---
 name: off
-description: Disable Consensus Harness for this project without erasing consensus.
+description: Disable Consensus for this project without erasing consensus.
 disable-model-invocation: true
 allowed-tools: Bash
 ---

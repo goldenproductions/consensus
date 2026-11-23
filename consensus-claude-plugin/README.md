@@ -1,4 +1,4 @@
-# Consensus Harness — Claude Code plugin v0.2
+# Consensus — plugin for Claude Code and Codex
 
 A tiny **local-first** collaborative layer for Claude Code in your terminal. No extra API key or model call. Uses your current Claude Code session.
 
@@ -14,14 +14,14 @@ This loads the plugin for that one Claude Code invocation only.
 
 ## Install permanently (local marketplace)
 
-The parent folder `consensus-skill/` is a local marketplace (`.claude-plugin/marketplace.json`, name `consensus-local`):
+The parent folder `consensus-skill/` is a local marketplace (`.claude-plugin/marketplace.json`, name `consensus`):
 
 ```bash
 claude plugin marketplace add /absolute/path/to/consensus-skill
-claude plugin install consensus-harness@consensus-local
+claude plugin install consensus@consensus
 ```
 
-Or inside Claude Code: `/plugin marketplace add /absolute/path/to/consensus-skill`, then `/plugin install consensus-harness@consensus-local`. After changing the plugin, bump `version` in both `plugin.json` and `marketplace.json`, run `claude plugin marketplace update consensus-local`, and start a new session. Remove with `claude plugin uninstall consensus-harness@consensus-local`.
+Or inside Claude Code: `/plugin marketplace add /absolute/path/to/consensus-skill`, then `/plugin install consensus@consensus`. After changing the plugin, bump `version` in both `plugin.json` and `marketplace.json`, run `claude plugin marketplace update consensus`, and start a new session. Remove with `claude plugin uninstall consensus@consensus`.
 
 ## Ask first (soft clarify gate)
 
@@ -41,7 +41,7 @@ Codex (0.171+) reads this plugin as it is: it understands `.claude-plugin/`, `ho
 
 ```bash
 codex plugin marketplace add /absolute/path/to/consensus-skill
-codex plugin add consensus-harness@consensus-local
+codex plugin add consensus@consensus
 ```
 
 Then, in `~/.codex/config.toml`:
@@ -55,18 +55,18 @@ hooks = true
 writable_roots = ["/home/<you>/.consensus-harness"]
 ```
 
-Start `codex` and choose **Trust all and continue** when it asks to review the new hooks (or review them with `/hooks`). Codex asks again whenever the hooks change. Turn the harness on per folder with `node consensus-claude-plugin/scripts/state.mjs on` from that folder. After changing the plugin, bump the version and run `codex plugin add consensus-harness@consensus-local` again. The unslop companion is Claude Code only.
+Start `codex` and choose **Trust all and continue** when it asks to review the new hooks (or review them with `/hooks`). Codex asks again whenever the hooks change. Turn consensus on per folder with `node consensus-claude-plugin/scripts/state.mjs on` from that folder. After changing the plugin, bump the version and run `codex plugin add consensus@consensus` again. The unslop companion is Claude Code only.
 
 ## Companion plugin: unslop
 
-`consensus-harness` depends on [unslop](https://github.com/heydamir/unslop) (CC-BY-4.0, by Damir Sokolovsky). The `consensus-local` marketplace lists it straight from upstream, pinned to a reviewed commit, so installing consensus-harness installs and enables unslop too. Nothing of unslop is copied into this repo. The harness treats unslop's confirmed design direction as an agreed `UI direction:` item, so later unslop runs and other work in the project stay on that direction. To move to a newer unslop, review the upstream diff, change `sha` in `.claude-plugin/marketplace.json`, and run `claude plugin marketplace update consensus-local`.
+`consensus` depends on [unslop](https://github.com/heydamir/unslop) (CC-BY-4.0, by Damir Sokolovsky). The `consensus` marketplace lists it straight from upstream, pinned to a reviewed commit, so installing consensus installs and enables unslop too. Nothing of unslop is copied into this repo. The plugin treats unslop's confirmed design direction as an agreed `UI direction:` item, so later unslop runs and other work in the project stay on that direction. To move to a newer unslop, review the upstream diff, change `sha` in `.claude-plugin/marketplace.json`, and run `claude plugin marketplace update consensus`.
 
 ## Commands inside Claude Code
 
-- `/consensus-harness:on` — enable for the project (on by default)
-- `/consensus-harness:off` — disable for the project, preserving state
-- `/consensus-harness:status` — inspect the shared understanding
-- `/consensus-harness:consensus` — explicitly request a consensus update
+- `/consensus:on` — enable for the project (on by default)
+- `/consensus:off` — disable for the project, preserving state
+- `/consensus:status` — inspect the shared understanding
+- `/consensus:consensus` — explicitly request a consensus update
 
 If command names differ on your Claude Code version, inspect the loaded plugin via `/plugin`. You can always use the direct CLI described below.
 

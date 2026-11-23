@@ -1,6 +1,6 @@
 ---
 name: on
-description: Enable Consensus Harness for this project.
+description: Enable Consensus for this project.
 disable-model-invocation: true
 allowed-tools: Bash
 ---

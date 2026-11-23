@@ -1,6 +1,6 @@
 # Consensus Brain
 
-A live terminal view of the Consensus Harness state, for a pane beside Claude Code. It draws the consensus as a small nervous system:
+A live terminal view of the Consensus state, for a pane beside Claude Code. It draws the consensus as a small nervous system:
 
 - the **goal** is the central neuron
 - **agreed** items (● teal) are wired with thick axons and fire steady impulses outward
@@ -8,7 +8,7 @@ A live terminal view of the Consensus Harness state, for a pane beside Claude Co
 - **assumed** items (○ lilac) hang on faint dotted links and flicker between ○ and ◌ until you confirm them
 - **rejected** items (✕ rose) stay visible on faint dotted links, so the "no" isn't lost
 - new or changed items flash and stay highlighted for a few seconds; removed items fade out in red
-- a dim cortex-shaped mesh sparks in the background; when the harness is off everything greys out
+- a dim cortex-shaped mesh sparks in the background; when consensus is off everything greys out
 
 The header doubles as the legend: `● 5 agreed  ◆ 2 open  ○ 2 assumed`, each in its node colour (symbols only below 60 columns).
 
@@ -65,7 +65,7 @@ The selected item keeps its status colour and breathes; the footer names its sta
 
 Press `+` and type a rule, constraint or question (`enter` continues, `esc` cancels), then choose how to save it: `a` agreed (a decision or rule Claude must follow; `enter` does the same) or `o` open (a question to settle). It lands in the topic you're looking at, marked as yours, and Claude is told about it on your next message, so you don't have to say it in the chat.
 
-The change is written through the plugin's own state script (`consensus-claude-plugin/scripts/state.mjs`, or `$CONSENSUS_STATE_CLI`), so the same rules apply as when Claude writes. Claude sees it in its context on your next prompt. Nothing is written when the harness is off. While an item is selected the viewer stays on the current consensus instead of following a newer one.
+The change is written through the plugin's own state script (`consensus-claude-plugin/scripts/state.mjs`, or `$CONSENSUS_STATE_CLI`), so the same rules apply as when Claude writes. Claude sees it in its context on your next prompt. Nothing is written when consensus is off. While an item is selected the viewer stays on the current consensus instead of following a newer one.
 
 Apart from these actions it only reads `~/.consensus-harness/` (or `$CONSENSUS_HOME`). Node.js 20+, no dependencies.
 

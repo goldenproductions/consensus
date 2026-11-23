@@ -1,11 +1,14 @@
 {
-  "name": "consensus-harness",
-  "description": "Conversation-first shared understanding for Claude Code, without separate model API keys",
-  "version": "0.10.0",
+  "name": "consensus",
+  "description": "Shared understanding between you and your AI coding agent (Claude Code, Codex): goals, decisions and open questions, kept live and visible",
+  "version": "0.11.0",
   "author": {
-    "name": "Consensus Harness"
+    "name": "Andreas Mattis Gullberg Hansen"
   },
   "dependencies": [
     "unslop"
-  ]
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/goldenproductions/consensus",
+  "repository": "https://github.com/goldenproductions/consensus"
 }

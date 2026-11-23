@@ -1,17 +1,17 @@
 {
-  "name": "consensus-local",
+  "name": "consensus",
   "owner": {
-    "name": "Consensus Harness"
+    "name": "Andreas Mattis Gullberg Hansen"
   },
   "metadata": {
-    "description": "Local marketplace for the Consensus Harness plugin"
+    "description": "Marketplace for the Consensus plugin"
   },
   "plugins": [
     {
-      "name": "consensus-harness",
+      "name": "consensus",
       "source": "./consensus-claude-plugin",
-      "description": "Conversation-first shared understanding for Claude Code, without separate model API keys",
-      "version": "0.10.0",
+      "description": "Shared understanding between you and your AI coding agent (Claude Code, Codex): goals, decisions and open questions, kept live and visible",
+      "version": "0.11.0",
       "dependencies": [
         "unslop"
       ]

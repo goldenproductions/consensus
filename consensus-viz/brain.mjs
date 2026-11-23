@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Consensus Brain: a live terminal view of the Consensus Harness state, meant for a pane beside Claude Code.
+// Consensus Brain: a live terminal view of the Consensus state, meant for a pane beside Claude Code.
 // Reads ~/.consensus-harness/{projects,sessions}/*.json. Writes only when you act on an item (a/o/x), and then
 // through the plugin's own state script, so the same rules apply as when Claude writes. No dependencies.
 import fs from 'node:fs';
@@ -13,7 +13,7 @@ const HOME = os.homedir();
 // Terminal background (asked via OSC 11 at start, or --bg RRGGBB). Dim colours blend toward it.
 let BG = [0, 0, 0];
 const STATE_CLI = process.env.CONSENSUS_STATE_CLI || path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'consensus-claude-plugin', 'scripts', 'state.mjs');
-const USAGE = `consensus-brain: live view of the Consensus Harness state
+const USAGE = `consensus-brain: live view of the Consensus state
 
 Usage: node brain.mjs [--project <dir>] [--no-mesh] [--once [--size WxH]]
 
@@ -249,7 +249,7 @@ const HELP = [ // what each status means for you and Claude, not how it is drawn
   ['✕', C.rejected, 'rejected', "You said no. Claude won't act on it or propose it again."],
   ['●', C.spark, 'bright', 'New or just changed.'],
   ['·', C.ghost, 'fading', 'Just removed: forgotten, as if it was never there.'],
-  ['●', C.off, 'all grey', "Harness is off. Claude isn't using the consensus."],
+  ['●', C.off, 'all grey', "Consensus is off. The AI isn't using the consensus."],
 ];
 // The four things a new user needs, shown first in the ? overlay.
 const HOWTO = [
@@ -652,7 +652,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   // empty states: tell a new user what happens next
   if (!opt.help && (!st || !alive.length) && S.gh >= 4) {
     const lines = !st
-      ? ['No consensus yet.', 'Start Claude Code with the Consensus Harness plugin;', 'decisions you make together appear here.', 'Press ? to see how it works.']
+      ? ['No consensus yet.', 'Start Claude Code with the Consensus plugin;', 'decisions you make together appear here.', 'Press ? to see how it works.']
       : ['Nothing recorded yet.', 'Talk with Claude: decisions you agree on appear here.', 'Press ? to see how it works.'];
     const top = S.gy + Math.max(0, Math.floor(S.gh / 2) + 2);
     lines.forEach((l, i) => { const t = truncate(l, W - 2); S.text(Math.max(1, Math.floor((W - [...t].length) / 2)), Math.min(S.gy + S.gh - 1, top + i), t, i === lines.length - 1 ? C.goal : C.dim, i === lines.length - 1); });
@@ -740,7 +740,7 @@ function addItem(text, status) {
 function goAhead() {
   const st = model.state;
   if (!st) return;
-  if (st.enabled === false) return say('harness is off: nothing changed', C.ghost);
+  if (st.enabled === false) return say('consensus is off: nothing changed', C.ghost);
   if (!model.asks) return say('no ask-first questions to skip', C.dim);
   if (!fs.existsSync(STATE_CLI)) return say('state script not found: set CONSENSUS_STATE_CLI', C.ghost);
   try { runState(st, ['go'], ''); say('▶ go: the AI proceeds on its own recommendations' + wakeHint(), C.agreed); }
@@ -749,7 +749,7 @@ function goAhead() {
 function act(kind) {
   const st = model.state, n = model.sel && model.nodes.get(model.sel);
   if (!st || !n) return;
-  if (st.enabled === false) return say('harness is off: nothing changed', C.ghost);
+  if (st.enabled === false) return say('consensus is off: nothing changed', C.ghost);
   if (kind === n.status) return say(`already ${kind}`, C[kind]);
   if (!fs.existsSync(STATE_CLI)) return say('state script not found: set CONSENSUS_STATE_CLI', C.ghost);
   if (kind === 'remove' && Date.now() - model.confirmX > 2500) { model.confirmX = Date.now(); return say('press x again to forget this item (to say no, use d)', C.open); }
@@ -830,8 +830,8 @@ if (process.stdin.isTTY) {
     else if (model.sel && k === 'd') { if (act('rejected')) model.input = {text: '', label: 'why? (optional): '}; }
     else if (k === 'G') goAhead();
     else if (k === 'W') toggleWake();
-    else if (k === '+' || k === '=') { if (model.state?.enabled === false) say('harness is off: nothing changed', C.ghost); else if (!model.state) say('no consensus to add to yet', C.ghost); else model.input = {mode: 'add', text: '', label: 'your item: '}; }
-    else if (model.sel && k === 'n') { if (model.state?.enabled === false) say('harness is off: nothing changed', C.ghost); else model.input = {text: ''}; }
+    else if (k === '+' || k === '=') { if (model.state?.enabled === false) say('consensus is off: nothing changed', C.ghost); else if (!model.state) say('no consensus to add to yet', C.ghost); else model.input = {mode: 'add', text: '', label: 'your item: '}; }
+    else if (model.sel && k === 'n') { if (model.state?.enabled === false) say('consensus is off: nothing changed', C.ghost); else model.input = {text: ''}; }
     else if (k === 'm') opt.mesh = !opt.mesh;
     else if (k === 'p') { model.pinned = !model.pinned; lastPoll = 0; }
     else if (k === '\t') {

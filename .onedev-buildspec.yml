@@ -1,0 +1,25 @@
+version: 54
+jobs:
+  # OneDev is the primary home of this repository. This job keeps the public
+  # GitHub mirror in step: every update to main, and every new tag on it.
+  # force: GitHub is only a mirror; OneDev history always wins there.
+  - name: mirror to github
+    steps:
+      - type: PushRepository
+        name: push to github
+        remoteUrl: https://github.com/goldenproductions/consensus.git
+        userName: git
+        passwordSecret: github-push-token
+        force: true
+        condition: SUCCESSFUL
+        optional: false
+    triggers:
+      - type: BranchUpdateTrigger
+        branches: main
+        userMatch: anyone
+      - type: TagCreateTrigger
+        branches: main
+    retryCondition: never
+    maxAttempts: 3
+    retryDelay: 30
+    timeout: 600
