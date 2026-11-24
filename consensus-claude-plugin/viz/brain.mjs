@@ -273,31 +273,39 @@ function getMesh(PW, PH) {
 
 // ---------- ? overlay: what the colours and effects mean ----------
 const HELP = [ // what each status means for you and Claude, not how it is drawn
-  ['●', C.agreed, 'agreed', 'You confirmed it. Claude follows it and asks before going against it.'],
+  ['●', C.agreed, 'agreed', 'You confirmed it. The AI follows it and asks before going against it.'],
   ['◆', C.open, 'open', 'Still to be decided. Neither of you should treat it as settled.'],
-  ['○', C.assumed, 'assumed', "Claude's own interpretation, not confirmed by you. Agree it, or correct Claude."],
+  ['○', C.assumed, 'assumed', "The AI's own interpretation, not confirmed by you. Agree it, or correct the AI."],
   ['✓', C.agreed, 'done', 'The work for it is finished; the line under it says how (e.g. merged in PR #16). Shown dimmed so open work stands out.'],
   ['◉', C.goal, 'goal', 'What the work is for. ◌ means no goal is agreed yet.'],
   ['◎', C.goal, 'earlier goal', 'Each goal is its own neuron, linked in a chain at the bottom. When the work moves on, a new goal starts and the old one keeps its items: < > opens them. Its agreed and rejected decisions still steer the AI.'],
   ['?', C.open, 'ask first', 'A question to settle before anything gets built. Answer it (n, then a), or press G to let the AI go with its recommendations.'],
   ['⌁', KIND.edit, 'files', 'Files the AI changed for a decision (shown under the selected item). △ unconfirmed: work on an item you haven\'t agreed. ✕ drift: work on something you rejected. ⌁ unlinked: edits not tied to any item.'],
   ['', C.dim, 'why', 'The problem the work solves. Until the goal and the why are agreed, the AI asks before it builds.'],
-  ['✕', C.rejected, 'rejected', "You said no. Claude won't act on it or propose it again."],
+  ['✕', C.rejected, 'rejected', "You said no. The AI won't act on it or propose it again."],
   ['●', C.spark, 'bright', 'New or just changed.'],
   ['·', C.ghost, 'fading', 'Just removed: forgotten, as if it was never there.'],
   ['●', C.off, 'all grey', "Consensus is off. The AI isn't using the consensus."],
 ];
 // The four things a new user needs, shown first in the ? overlay.
 const HOWTO = [
-  'Talk with Claude as usual. Decisions land here, by topic.',
+  'Talk with your AI as usual. Decisions land here, by topic.',
   "○ ◆ wait for you (⚑). ↵ jumps there: a agree, d disagree, n note.",
-  '● agreed is what Claude works from. ◆ open is undecided.',
-  'Your changes here, and your own items (+), reach Claude with your next message.',
+  '● agreed is what the AI works from. ◆ open is undecided.',
+  'Your changes here, and your own items (+), reach the AI with your next message.',
 ];
 function drawHelp(S, W, H) {
   const boxW = Math.min(W - 2, 76), wide = boxW >= 56, nameW = 11;
   const descW = wide ? boxW - nameW - 6 : boxW - 8;
   const rows = []; // {g, col, name, text, kind}
+  const info = model.info;
+  if (info) { // what is not in the header: where this is, the why, the counts
+    rows.push({kind: 'head', text: 'this consensus'});
+    const c = info.counts, tally = [['agreed', '●'], ['open', '◆'], ['assumed', '○'], ['rejected', '✕']].map(([s, g]) => `${g} ${c[s]} ${s}`).join('  ');
+    for (const [label, text] of [['where', `${info.name} · changed ${info.age}`], ['why', info.why || 'not agreed yet: the AI asks before it builds'], ['items', tally]])
+      wrap(text, boxW - 14).forEach((l, i) => rows.push({kind: 'info', label: i ? '' : label, text: l}));
+    rows.push({kind: 'plain', text: ''});
+  }
   rows.push({kind: 'head', text: 'how it works'});
   HOWTO.forEach((h, i) => wrap(h, boxW - 8).forEach((l, j) => rows.push({kind: 'step', n: j ? '' : String(i + 1), text: l})));
   rows.push({kind: 'plain', text: ''}, {kind: 'head', text: 'what it means'});
@@ -319,6 +327,7 @@ function drawHelp(S, W, H) {
     if (row.kind === 'head') S.text(x0 + 2, y, row.text, C.goal, true);
     else if (row.kind === 'step') { if (row.n) S.text(x0 + 3, y, row.n, C.agreed, true); S.text(x0 + 6, y, row.text, C.text); }
     else if (row.kind === 'plain') S.text(x0 + 2, y, row.text, C.dim);
+    else if (row.kind === 'info') { if (row.label) S.text(x0 + 3, y, row.label, C.dim); S.text(x0 + 10, y, row.text, C.text); }
     else {
       if (row.g) S.text(x0 + 2, y, row.g, row.col, true);
       if (row.name) S.text(x0 + 4, y, row.name, row.col, true);
@@ -358,14 +367,10 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   const fresh = n => now - attnT(n) < FRESH_MS;
   const recent = n => now - attnT(n) < ATTN_MS;
 
-  // header
+  // header: the goal, and one status on the right. Everything else (project, why, counts, age) is in the ? help.
   let y = 0;
   const name = !st ? 'no consensus yet' : (path.resolve(st.project || '/') === HOME ? '~' : path.basename(st.project || '/')) + (st.session ? ` · session ${String(st.session).slice(0, 8)}` : '');
-  const age = st ? fmtAge(Date.now() - model.mtime) : '';
-  const tail = (off ? 'OFF' : '') + (off && W >= 44 ? '  ' : '') + (W >= 44 ? age : '');
-  const named = W >= 60; // legend: wide panes name each colour, narrow ones show only the symbols
-  const parts = [[`● ${counts.agreed}${named ? ' agreed' : ''}`, C.agreed], [`◆ ${counts.open}${named ? ' open' : ''}`, C.open], [`○ ${counts.assumed}${named ? ' assumed' : ''}`, C.assumed]];
-  if (counts.rejected) parts.push([`✕ ${counts.rejected}${named ? ' rejected' : ''}`, C.rejected]);
+  const named = W >= 60; // wide panes name the status, narrow ones show only the symbol
   // needs you: assumptions and open questions waiting for the user's answer, newest first
   // ask-first questions come first: they hold up the building
   const asks = alive.filter(n => n.ask);
@@ -377,43 +382,33 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   const unconf = alive.filter(n => (n.status === 'open' || n.status === 'assumed') && edited(n.id)).length;
   const unlinked = edited('_unlinked');
   model.unlinked = unlinked;
-  if (st && (drift || unconf || unlinked)) parts.unshift(drift ? [`✕ ${drift}${named ? ' drift' : ''}`, C.rejected] : unconf ? [`△ ${unconf}${named ? ' unconfirmed' : ''}`, mix(C.open, C.dim, 0.2)] : [`⌁ ${unlinked}${named ? ' unlinked' : ''}`, C.dim]);
-  if (st && asks.length) parts.unshift([`? ${asks.length}${named ? ' ask first' : ''}`, mix(C.open, C.goal, 0.4 + 0.4 * Math.sin(t * 4))]);
-  if (st) parts.unshift(needs.length
-    ? [`⚑ ${needs.length}${named ? ' need you' : ''}`, mix(C.open, C.goal, 0.25 + 0.25 * Math.sin(t * 3))]
-    : [named ? '✓ all clear' : '✓', mix(C.agreed, C.dim, 0.5)]);
-  const rightLen = parts.reduce((a, [s]) => a + [...s].length + 2, 0) + (tail ? [...tail].length + 1 : 0);
-  let rx0 = W - rightLen;
-  for (const [txt, col] of parts) { S.text(rx0, y, txt, tone(col), true); rx0 += [...txt].length + 2; }
-  if (tail) S.text(rx0 + 1, y, tail, off ? C.ghost : tone(C.dim));
-  const avail = W - rightLen - 2;
-  if (avail >= 12) {
-    S.text(1, y, '◉ CONSENSUS', tone(C.goal), true);
-    if (avail - 14 >= 4) S.text(14, y, truncate(name, avail - 14), tone(C.dim));
-  } else if (avail >= 2) S.text(1, y, '◉', tone(C.goal), true);
-  y++;
+  // the one status: the most urgent thing, else what waits for you, else all clear
+  const status = !st ? null
+    : off ? ['OFF', C.ghost]
+    : drift ? [`✕ ${drift}${named ? ' drift' : ''}`, C.rejected]
+    : asks.length ? [`? ${asks.length}${named ? ' ask first' : ''}`, mix(C.open, C.goal, 0.4 + 0.4 * Math.sin(t * 4))]
+    : needs.length ? [`⚑ ${needs.length}${named ? ' need you' : ''}`, mix(C.open, C.goal, 0.25 + 0.25 * Math.sin(t * 3))]
+    : unconf ? [`△ ${unconf}${named ? ' unconfirmed' : ''}`, mix(C.open, C.dim, 0.2)]
+    : unlinked ? [`⌁ ${unlinked}${named ? ' unlinked' : ''}`, C.dim]
+    : [named ? '✓ all clear' : '✓', mix(C.agreed, C.dim, 0.5)];
+  const sLen = status ? [...status[0]].length + 2 : 0;
+  if (status) S.text(W - sLen, y, status[0], tone(status[1]), true);
+  // the goal: ◉ now, ◎ an earlier one (quieter, "was:"), ◌ none yet. The why is in the ? help.
   const goalFresh = now - model.goalChanged < FRESH_MS;
-  // an earlier goal is labelled "was" and drawn quieter, so it never reads as what the AI works on now
-  const goalLines = vgoal ? wrap(vgoal, W - 8).slice(0, 2) : [earlierView ? '(no goal was set)' : 'not agreed yet'];
-  goalLines.forEach((l, i) => {
-    if (i === 0) S.text(1, y, earlierView ? 'was' : 'goal', tone(earlierView ? C.open : C.dim));
-    S.text(7, y, i === 1 && wrap(vgoal, W - 8).length > 2 ? truncate(l + ' …', W - 8) : l, vgoal ? tone(switching ? mix(C.spark, earlierView ? mix(C.goal, C.dim, 0.35) : C.goal, clamp(vsT / SW.banner, 0, 1)) : earlierView ? mix(C.goal, C.dim, 0.35) : goalFresh ? C.spark : C.goal) : tone(C.dim), !!vgoal && !earlierView);
-    y++;
-  });
-  // the why: the problem it solves. Missing while a goal exists = the AI should ask before building.
   const vwhy = earlierView ? vg.why : String(st?.why || '');
-  if (st && (vwhy || (vgoal && !earlierView))) {
-    const wl = vwhy ? wrap(vwhy, W - 8) : ['not agreed yet: the AI asks before it builds'];
-    wl.slice(0, 2).forEach((l, i) => {
-      if (i === 0) S.text(1, y, 'why', tone(C.dim));
-      S.text(7, y, i === 1 && wl.length > 2 ? truncate(l + ' …', W - 8) : l, vwhy ? tone(mix(C.text, C.goal, 0.3)) : tone(mix(C.open, C.dim, 0.35)), false);
-      y++;
-    });
-  }
+  const gGlyph = earlierView ? '◎' : vgoal ? '◉' : '◌';
+  const gText = (earlierView ? 'was: ' : '') + (vgoal || (earlierView ? '(no goal was set)' : st ? 'no goal yet' : 'no consensus yet'));
+  const gRoom = Math.max(4, W - sLen - 5);
+  const gCol = !vgoal ? C.dim : switching ? mix(C.spark, earlierView ? mix(C.goal, C.dim, 0.35) : C.goal, clamp(vsT / SW.banner, 0, 1)) : earlierView ? mix(C.goal, C.dim, 0.35) : goalFresh ? C.spark : C.goal;
+  S.text(1, y, gGlyph, tone(earlierView ? C.open : C.goal), true);
+  S.text(3, y, truncate(gText, gRoom), tone(gCol), !!vgoal && !earlierView);
+  y++;
+  // for the ? help: what moved out of the header
+  model.info = st ? {name, why: vwhy, goal: vgoal, counts, age: fmtAge(Date.now() - model.mtime)} : null;
   // what Claude is doing right now (from the plugin's activity hook)
   if (act && W >= 30) {
     const spin = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'[Math.floor(t * 10) % 10], pulse = 0.5 + 0.5 * Math.sin(t * 3);
-    const who = act.agent || 'Claude', waitText = /^(Claude|Codex)\b/.test(act.label || '') ? act.label : `${who} ${act.label}`;
+    const who = act.agent || 'AI', waitText = /^(Claude|Codex)\b/.test(act.label || '') ? act.label : `${who} ${act.label}`;
     const [icon, col, text] = waitingP ? ['⚠', mix(C.open, C.goal, 0.3 * pulse), waitText]
       : busy ? [spin, mix(kcol, C.goal, 0.2), `${who} · ${act.label}${act.item && model.nodes.get(act.item) ? ` → ${model.nodes.get(act.item).text}` : ''}`]
       : act.state === 'idle' ? ['◉', mix(C.agreed, C.goal, 0.3 * pulse), model.needs.length ? `your turn · ⚑ ${model.needs.length} need you, press enter` : 'your turn']
@@ -755,8 +750,8 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   // empty states: tell a new user what happens next
   if (!opt.help && (!st || !alive.length) && S.gh >= 4) {
     const lines = !st
-      ? ['No consensus yet.', 'Start Claude Code with the Consensus plugin;', 'decisions you make together appear here.', 'Press ? to see how it works.']
-      : ['Nothing recorded yet.', 'Talk with Claude: decisions you agree on appear here.', 'Press ? to see how it works.'];
+      ? ['No consensus yet.', 'Start Claude Code or Codex with the Consensus plugin;', 'decisions you make together appear here.', 'Press ? to see how it works.']
+      : ['Nothing recorded yet.', 'Talk with your AI: decisions you agree on appear here.', 'Press ? to see how it works.'];
     const top = S.gy + Math.max(0, Math.floor(S.gh / 2) + 2);
     lines.forEach((l, i) => { const t = truncate(l, W - 2); S.text(Math.max(1, Math.floor((W - [...t].length) / 2)), Math.min(S.gy + S.gh - 1, top + i), t, i === lines.length - 1 ? C.goal : C.dim, i === lines.length - 1); });
   }

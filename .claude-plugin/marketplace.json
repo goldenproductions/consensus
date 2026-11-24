@@ -11,7 +11,7 @@
       "name": "consensus",
       "source": "./consensus-claude-plugin",
       "description": "Shared understanding between you and your AI coding agent (Claude Code, Codex): goals, decisions and open questions, kept live and visible",
-      "version": "0.16.0",
+      "version": "0.16.1",
       "dependencies": [
         "unslop"
       ]
