@@ -35,6 +35,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--once') opt.once = true;
   else if (a === '--topic') opt.topic = argv[++i] || ''; // --once tests: open this topic
   else if (a === '--offset') opt.offset = +argv[++i] || 0; // --once tests: start further back
+  else if (a === '--switch-at') opt.switchAt = +argv[++i] || 0; // --once tests: frame this many ms into a goal switch
   else if (a === '--goal') opt.goal = +argv[++i] || 0; // --once tests: look at the n-th goal (1 = oldest)
   else if (a === '--select') opt.select = +argv[++i] || 0; // --once tests: preselect the n-th item
   else if (a === '--show-help') opt.help = true; // start with the ? overlay open (also for --once tests)
@@ -142,7 +143,7 @@ function load(pick, now) {
   const gid = String(st.goalId || '');
   model.goals = [...(Array.isArray(st.goals) ? st.goals : []).map(g => ({id: String(g.id), goal: String(g.goal || ''), why: String(g.why || '')})),
     {id: gid, goal: String(st.goal || ''), why: String(st.why || ''), current: true}];
-  if (!model.first && gid !== model.goalId && model.goals.length > 1) { model.goalSpawn = now; model.view = null; model.segManual = false; model.offset = 0; model.pages = []; model.sel = null; }
+  if (!model.first && gid !== model.goalId && model.goals.length > 1) { model.goalSpawn = now; model.viewSwitch = {at: now, from: model.goals.length - 2, to: model.goals.length - 1, spawn: true}; model.view = null; model.segManual = false; model.offset = 0; model.pages = []; model.sel = null; }
   model.goalId = gid;
   const goal = String(st.goal || '');
   if (goal !== model.goal && !model.first) model.goalChanged = now;
@@ -155,11 +156,15 @@ function switchGoal(d) {
   const gs = model.goals || [];
   if (gs.length < 2) return say('one goal so far: a new goal starts when the work moves on', C.dim);
   const i = model.view ?? gs.length - 1, j = clamp(i + d, 0, gs.length - 1);
-  if (j === i) return;
+  if (j === i) return say(d < 0 ? '◎ this is the first goal' : '◉ this is the current goal', C.dim);
   model.view = j === gs.length - 1 ? null : j;
   model.segManual = false; model.offset = 0; model.pages = []; model.sel = null;
-  say(model.view === null ? '◉ current goal' : `◎ earlier goal ${j + 1} of ${gs.length} · its agreed and rejected decisions still apply`, C.goal);
+  // the switch animation: a spark runs along the chain from goal i to goal j and into the centre,
+  // a banner names the goal, and its items grow back out of the neuron
+  model.viewSwitch = {at: Date.now(), from: i, to: j};
 }
+// How a switch looks, in ms from the key press: spark along the chain, into the centre, burst; banner throughout.
+const SW = {chain: 450, stalk: 300, burst: 700, banner: 1800};
 // A session state (home folder) takes its on/off switch from the folder's own state, like the plugin does.
 function folderEnabled(st) {
   for (const s of listStates()) {
@@ -329,6 +334,9 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   for (const n of [...model.nodes.values()]) if (n.removed !== null && now - n.removed > 1600) model.nodes.delete(n.id);
   // newest first: last created or changed (timestamps from the state script), else creation order
   const vg = viewedGoal(), earlierView = !vg.current, vgoal = vg.current ? model.goal : vg.goal;
+  // goal switch (< >): items wait while the spark travels, then grow back out of the neuron
+  const vs = model.viewSwitch, vsT = vs ? now - vs.at : Infinity, switching = vsT < SW.banner;
+  const settle = vsT < SW.chain + SW.stalk ? 0 : clamp((vsT - SW.chain - SW.stalk) / SW.burst, 0, 1);
   const alive = [...model.nodes.values()].filter(n => n.removed === null && inGoal(n, vg)).sort((a, b) => (b.time - a.time) || (b.order - a.order));
   const ghosts = [...model.nodes.values()].filter(n => n.removed !== null);
   alive.forEach((n, i) => { n.idx = i + 1; n.rank = i; });
@@ -352,7 +360,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   // needs you: assumptions and open questions waiting for the user's answer, newest first
   // ask-first questions come first: they hold up the building
   const asks = alive.filter(n => n.ask);
-  const needs = [...asks, ...alive.filter(n => !n.ask && (n.status === 'assumed' || n.status === 'open'))];
+  const needs = [...asks, ...alive.filter(n => !n.ask && n.done === null && (n.status === 'assumed' || n.status === 'open'))];
   model.needs = needs.map(n => n.id); model.asks = asks.length;
   // trace: edits on a rejected item (drift), on unconfirmed items, or on no item at all
   const tItems = model.trace?.items || {}, edited = id => Object.keys(tItems[id]?.files || {}).length;
@@ -380,7 +388,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   const goalLines = vgoal ? wrap(vgoal, W - 8).slice(0, 2) : [earlierView ? '(no goal was set)' : 'not agreed yet'];
   goalLines.forEach((l, i) => {
     if (i === 0) S.text(1, y, earlierView ? 'was' : 'goal', tone(earlierView ? C.open : C.dim));
-    S.text(7, y, i === 1 && wrap(vgoal, W - 8).length > 2 ? truncate(l + ' …', W - 8) : l, vgoal ? tone(earlierView ? mix(C.goal, C.dim, 0.35) : goalFresh ? C.spark : C.goal) : tone(C.dim), !!vgoal && !earlierView);
+    S.text(7, y, i === 1 && wrap(vgoal, W - 8).length > 2 ? truncate(l + ' …', W - 8) : l, vgoal ? tone(switching ? mix(C.spark, earlierView ? mix(C.goal, C.dim, 0.35) : C.goal, clamp(vsT / SW.banner, 0, 1)) : earlierView ? mix(C.goal, C.dim, 0.35) : goalFresh ? C.spark : C.goal) : tone(C.dim), !!vgoal && !earlierView);
     y++;
   });
   // the why: the problem it solves. Missing while a goal exists = the AI should ask before building.
@@ -574,11 +582,12 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   }
   // synapses: goal <-> item; a new item's synapse grows out of the goal
   for (const n of [...placed, ...ghosts.filter(g => g.last)]) {
+    if (settle <= 0 && n.removed === null) continue;
     const [x, yy] = n.last;
     const [sx, sy] = n.removed !== null ? [cx, cy] : hub;
     const f = curve(sx, sy, x, yy, n.seed), len = Math.hypot(x - sx, yy - sy);
     const steps = Math.max(4, Math.ceil(len / 1.1));
-    const grow = n.removed !== null ? 1 : easeOut(clamp((now - n.born) / 700, 0, 1));
+    const grow = n.removed !== null ? 1 : Math.min(easeOut(clamp((now - n.born) / 700, 0, 1)), easeOut(settle));
     const ghostK = n.removed !== null ? 1 - (now - n.removed) / 1600 : 1;
     const col = n.removed !== null ? C.ghost : C[n.status];
     const every = n.status === 'assumed' || n.status === 'rejected' || n.removed !== null ? 2 : 1;
@@ -636,7 +645,14 @@ function frame(now, W, H, color = true, rowPrefix = null) {
     }
     if (firstShown > 0) S.line(chainX(firstShown) - 6, chainY, chainX(firstShown) - 2, chainY, tone(C.dim), glow(0, 0.5), 2);
     // a faint stalk from the chain up to the big neuron: which goal is open
-    if (gIdx >= firstShown && gIdx < last) S.line(chainX(gIdx), chainY - 3, cx, cy + 10, tone(C.goal), glow(0, 0.18), 3);
+    if (gIdx >= firstShown && gIdx < last) S.line(chainX(gIdx), chainY - 3, cx, cy + 10, tone(C.goal), glow(0, switching ? 0.45 : 0.18), switching ? 1 : 3);
+    if (vs && vsT < SW.chain + SW.stalk && !off) {
+      const fx = chainX(clamp(vs.from, firstShown, last - 1)), tx = chainX(clamp(vs.to, firstShown, last - 1));
+      const at = vsT < SW.chain ? (p => [fx + (tx - fx) * p, chainY])(easeOut(vsT / SW.chain))
+        : (p => [tx + (cx - tx) * p, chainY - 3 + (cy + 4 - chainY + 3) * p])(easeOut((vsT - SW.chain) / SW.stalk));
+      for (let k = 0; k < 4; k++) S.ring(at[0], at[1], 1 + k * 0.8, C.spark, 1 - k * 0.22);
+      if (vsT < SW.chain) for (let k = 1; k < 8; k++) S.dot(at[0] - Math.sign(tx - fx) * k * 1.5, chainY, C.spark, 0.9 - k * 0.11); // trail
+    }
     // new goal: the old neuron shrinks and drifts into the chain, the new one grows in the centre
     if (spawnP < 1 && chainN - 2 >= firstShown) {
       const e = easeOut(spawnP), ox = cx + (chainX(chainN - 2) - cx) * e, oy = cy + (chainY - cy) * e;
@@ -658,6 +674,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
     if (r < S.gy + S.gh) S.text(c, r, '·', C.ghost.map(v => v * (1 - (now - n.removed) / 1600)), true);
   }
   for (const n of placed) {
+    if (settle <= 0) continue;
     const {side, c, r} = n.cell, f = fresh(n);
     const sel = n.id === model.sel, wave = 0.5 + 0.5 * Math.sin(t * 2.2 + n.seed * 6);
     const pulse = n.status === 'open' ? 0.65 + 0.35 * Math.sin(t * 3 + n.seed * 6) : n.status === 'assumed' ? 0.55 + 0.45 * wave : 1;
@@ -672,7 +689,9 @@ function frame(now, W, H, color = true, rowPrefix = null) {
     const da = now - attnT(n), rec = recent(n);
     // recent items pulse between their colour and bright white; the first 0.7s the text types itself in
     const pcol = rec ? mix(C[n.status], C.goal, 0.45 + 0.4 * (0.5 + 0.5 * Math.sin(t * (da < FRESH_MS ? 6 : 2.5)))) : null;
-    let budget = da < 700 ? Math.floor(n.lines.reduce((a, l) => a + [...l].length, 0) * da / 700) : Infinity;
+    const chars = n.lines.reduce((a, l) => a + [...l].length, 0);
+    let budget = da < 700 ? Math.floor(chars * da / 700) : Infinity;
+    if (settle < 1) budget = Math.min(budget, Math.floor(chars * settle));
     n.lines.forEach((l, i) => {
       const isNote = i >= (n.textLines || n.lines.length), isFile = n.fileFrom != null && i >= n.fileFrom, cp = [...l], shown = budget === Infinity ? l : cp.slice(0, Math.max(0, budget)).join('');
       budget -= cp.length;
@@ -703,6 +722,19 @@ function frame(now, W, H, color = true, rowPrefix = null) {
     for (const [st2, g, c] of parts) { const txt = `${g} ${c}`; S.text(x, r, txt, tone(C[st2], k)); x += [...txt].length + 1; }
     S.text(nodeCol.left, r, '◈', isOpen ? C.goal : tone(C.mesh, 1.4 * k), true);
     if (isOpen) S.text(nodeCol.left + 1, r, '▸', C.goal, true);
+  }
+  if (vs && settle > 0 && settle < 1 && !off) for (let k = 0; k < 3; k++) { const p = clamp(settle * 1.3 - k * 0.15, 0, 1); if (p > 0 && p < 1) S.ring(cx, cy, 4 + 26 * easeOut(p), mix(C.spark, C.goal, 0.3), 1 - p); }
+  if (vs && switching && S.gh >= 5) {
+    const gsN = (model.goals || []).length, cur = vs.to === gsN - 1;
+    const head = vs.spawn ? `✦ new goal  ${vs.to + 1} of ${gsN}` : cur ? `▸ current goal  ${vs.to + 1} of ${gsN}` : `◂ earlier goal  ${vs.to + 1} of ${gsN}`;
+    const sub = truncate(vgoal || '(no goal was set)', Math.max(8, Math.min(W - 8, 60)));
+    const bw = Math.min(W - 2, Math.max([...head].length, [...sub].length) + 6), bx = Math.max(0, Math.floor((W - bw) / 2)), by = S.gy + 1;
+    const fade = clamp((SW.banner - vsT) / 500, 0, 1), col = mix(C.dim, cur ? C.goal : C.open, fade), tcol = mix(C.dim, C.goal, fade);
+    const blank = ' '.repeat(Math.max(0, bw - 2));
+    S.text(bx, by, '╭' + '─'.repeat(bw - 2) + '╮', col);
+    S.text(bx, by + 1, '│' + blank + '│', col); S.text(bx + 3, by + 1, head, col, true);
+    S.text(bx, by + 2, '│' + blank + '│', col); S.text(bx + 3, by + 2, sub, tcol, true);
+    S.text(bx, by + 3, '╰' + '─'.repeat(bw - 2) + '╯', col);
   }
   if (opt.help) drawHelp(S, W, H);
   // empty states: tell a new user what happens next
@@ -825,6 +857,7 @@ if (opt.once) {
   poll(now - 20000);
   if (opt.offset) model.offset = opt.offset;
   if (opt.goal && model.goals && opt.goal < model.goals.length) model.view = opt.goal - 1;
+  if (opt.switchAt != null && model.goals) model.viewSwitch = {at: now - opt.switchAt, from: model.goals.length - 1, to: model.view ?? model.goals.length - 1};
   if (opt.topic) { model.openSeg = opt.topic; model.segManual = true; }
   for (let i = 0; i < 40; i++) frame(now - 4000 + i * 100, W, H); // settle angles
   if (opt.select) model.sel = model.order[opt.select - 1] || null;

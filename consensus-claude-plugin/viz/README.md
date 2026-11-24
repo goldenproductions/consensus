@@ -7,7 +7,7 @@ A live terminal view of the Consensus state, for a pane beside Claude Code. It d
 - **open** questions (◆ amber) pulse and send signals back to the goal
 - **assumed** items (○ lilac) hang on faint dotted links and flicker between ○ and ◌ until you confirm them
 - **rejected** items (✕ rose) stay visible on faint dotted links, so the "no" isn't lost
-- each **goal** is its own neuron: when the work moves on and you agree a new goal, the old neuron drifts into a chain at the bottom and a new one grows in the centre. `<` and `>` open an earlier goal with its items (labelled `was`); its agreed and rejected decisions still steer the AI. `g` returns to the current goal
+- each **goal** is its own neuron: when the work moves on and you agree a new goal, the old neuron drifts into a chain at the bottom and a new one grows in the centre. `<` and `>` switch goals: a spark runs along the chain into the centre, a banner names the goal, and its items (labelled `was` for an earlier goal) grow back out of the neuron; its agreed and rejected decisions still steer the AI. `g` returns to the current goal
 - **done** items (✓) are decisions whose work is finished: dimmed, with a line saying how (`✓ merged in PR #16`)
 - new or changed items flash and stay highlighted for a few seconds; removed items fade out in red
 - a dim cortex-shaped mesh sparks in the background; when consensus is off everything greys out
