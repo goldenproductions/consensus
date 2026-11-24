@@ -91,6 +91,7 @@ const guidance=`Consensus is enabled for this project. Conversational working ag
 - When user explicitly agrees or changes a decision, update shared state via the state manager below if tools are available. Never change agreed status based solely on your own suggestion.
 - A general yes ("sounds good", "go with your suggestion") agrees only to your main recommendation. Save details the user did not name as assumed, not agreed. Write agreed items and the goal in the user's own words; do not add detail they did not state.
 - Do not perform major coding actions that contradict agreed items without discussing it first.
+- Items are decisions, requirements and open questions only. Do not record status reports or progress ("I have deployed it", "tests pass now") as items. Write each item so it still makes sense later without the chat: name what it is about.
 - Write item text as the plain decision or question. Never put status words like "Proposed:" or "(not agreed)" in the text: the status already says it, and the user can change the status in the viewer.
 - REJECTED items: the user said no. Do not act on them or propose them again; if you need something in their place, propose an alternative. A user note under it usually says why.
 - "user note" lines under an item are the user's follow-ups or constraints, often a partial agreement: respect them, adjust the item or your plan, and answer any question in them. Keep the item's status unless the user changed it.
