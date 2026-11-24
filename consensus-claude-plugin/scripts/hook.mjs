@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {load, resolveProject, isSharedDir, pruneSessions, getPaths, readSeen, markSeen, eventLine} from './state.mjs';
+import {load, resolveProject, isSharedDir, pruneSessions, getPaths, readSeen, markSeen, eventLine, isCurrent} from './state.mjs';
 import {archive, migrateFolderState, renderMemory} from './memory.mjs';
 const chunks=[];
 for await (const chunk of process.stdin) chunks.push(chunk);
@@ -29,7 +29,9 @@ if(event==='SessionStart'){ try{ migrateFolderState(project); memory=renderMemor
 const MAX_ITEMS=15;
 // Rejected right after agreed: a "no" must stay in view so Claude doesn't propose it again.
 const rank={agreed:0,rejected:1,open:2,assumed:3};
-const ordered=state.items.map((x,i)=>[x,i]).sort((a,b)=>(rank[a[0].status]??3)-(rank[b[0].status]??3)||a[1]-b[1]).map(([x])=>x);
+// The current goal's items are the working list; earlier goals contribute only what still binds (below).
+const curItems=state.items.filter(x=>isCurrent(state,x));
+const ordered=curItems.map((x,i)=>[x,i]).sort((a,b)=>(rank[a[0].status]??3)-(rank[b[0].status]??3)||a[1]-b[1]).map(([x])=>x);
 // Agreed and rejected items are binding, and the user's own items are their words: always shown.
 // The cap only trims Claude's open and assumed items, and the newest few of those always stay in view.
 const binding=ordered.filter(x=>x.status==='agreed'||x.status==='rejected'||x.by==='user');
@@ -40,8 +42,13 @@ const hidden=ordered.filter(x=>!shown.includes(x));
 const counts=['agreed','rejected','open','assumed'].map(st=>[st,hidden.filter(x=>x.status===st).length]).filter(([,n])=>n).map(([st,n])=>`${n} ${st}`).join(', ');
 const noteLines=x=>(x.notes||[]).map(n=>`\n    ↳ ${n.by==='user'?'user note':'note'}: ${n.text}`).join('');
 const workingId=state.working?.id;
-const brief=shown.map(x=>`- ${x.status.toUpperCase()}${x.done?` (done${x.done.note?`: ${x.done.note}`:''})`:x.id===workingId?' (you are working on this)':''}${x.first?' (ask first)':''}${x.by==='user'?' (set by the user in the viewer)':''} {${x.topic||'no topic'}} [${x.id.slice(0,8)}]: ${x.text}${noteLines(x)}`).join('\n')
+const line=x=>`- ${x.status.toUpperCase()}${x.done?` (done${x.done.note?`: ${x.done.note}`:''})`:x.id===workingId?' (you are working on this)':''}${x.first?' (ask first)':''}${x.by==='user'?' (set by the user in the viewer)':''} {${x.topic||'no topic'}} [${x.id.slice(0,8)}]: ${x.text}${noteLines(x)}`;
+const brief=shown.map(line).join('\n')
   +(hidden.length?`\n- +${hidden.length} more not shown (${counts}); run status-json to see them`:'');
+// Earlier goals: their agreed decisions (not yet done) and rejections still apply; the rest stays in the viewer.
+const earlierGoals=(state.goals||[]).map(g=>({g,binding:state.items.filter(x=>x.goal===g.id&&((x.status==='agreed'&&!x.done)||x.status==='rejected'))})).filter(e=>e.binding.length);
+const earlierRest=state.items.filter(x=>!isCurrent(state,x)).length-earlierGoals.reduce((a,e)=>a+e.binding.length,0);
+const earlier=earlierGoals.length?`\nStill binding from earlier goals:${earlierGoals.map(({g,binding})=>`\n  Earlier goal: ${g.goal||'(none)'}\n${binding.map(x=>'  '+line(x).replace(/\n/g,'\n  ')).join('\n')}`).join('')}${earlierRest>0?`\n  (+${earlierRest} done, open or assumed items under earlier goals; status-json shows them)`:''}`:'';
 // Pin the project explicitly so the CLI hits the same state file even if the shell has cd'd elsewhere.
 // Commands in the syntax of the shell the agent actually uses: Codex on Windows runs PowerShell, everything else
 // (Claude Code everywhere, including its Git Bash on Windows; Codex on Linux/macOS) runs a POSIX shell.
@@ -55,7 +62,7 @@ if(shell==='powershell'){
   const env=`$env:CONSENSUS_PROJECT=${q(project)}; ${session?`$env:CONSENSUS_SESSION=${q(session)}; `:''}$OutputEncoding=[Text.Encoding]::UTF8;`;
   const cli=`node ${q(stateCli)}`;
   usage=`State manager, run in PowerShell as: ${env} ${cli} <command>
-Commands: goal - | why - | gist - | add <agreed|assumed|open> --topic "<Topic>" [--first] - | go | work <id> | done <id> - | undone <id> | edit <id> <agreed|assumed|open|rejected> - | topic <id> "<Topic>" | retopic "<Old>" "<New>" | remove <id> | status-json (full state). <id> is the short id in brackets above or the full id.
+Commands: goal - | goal --new - | why - | gist - | add <agreed|assumed|open> --topic "<Topic>" [--first] - | go | work <id> | done <id> - | undone <id> | edit <id> <agreed|assumed|open|rejected> - | topic <id> "<Topic>" | retopic "<Old>" "<New>" | remove <id> | status-json (full state). <id> is the short id in brackets above or the full id.
 "-" reads the text from stdin. Always pipe the text in from a single-quoted here-string (@' on its own line, '@ at the very start of a line) so PowerShell never expands the user's words, e.g.:
 ${env} @'
 <text>
@@ -64,18 +71,18 @@ ${env} @'
   const q=v=>`'${String(v).replace(/'/g,"'\\''")}'`;
   const cli=`CONSENSUS_PROJECT=${q(project)}${session?` CONSENSUS_SESSION=${q(session)}`:''} node ${q(stateCli)}`;
   usage=`State manager, run via Bash as: ${cli} <command>
-Commands: goal - | why - | gist - | add <agreed|assumed|open> --topic "<Topic>" [--first] - | go | work <id> | done <id> - | undone <id> | edit <id> <agreed|assumed|open|rejected> - | topic <id> "<Topic>" | retopic "<Old>" "<New>" | remove <id> | status-json (full state). <id> is the short id in brackets above or the full id.
+Commands: goal - | goal --new - | why - | gist - | add <agreed|assumed|open> --topic "<Topic>" [--first] - | go | work <id> | done <id> - | undone <id> | edit <id> <agreed|assumed|open|rejected> - | topic <id> "<Topic>" | retopic "<Old>" "<New>" | remove <id> | status-json (full state). <id> is the short id in brackets above or the full id.
 "-" reads the text from stdin. Always pass text through a quoted heredoc so the shell never expands the user's words, e.g.:
 ${cli} add agreed - <<'EOF'
 <text>
 EOF`;
 }const scope=session?(isSharedDir(project)?' (this session; started in the home folder)':' (this session)'):'';
 // The topics in use, so new items reuse them instead of each getting its own.
-const topicCounts=new Map();for(const x of state.items)if(x.topic)topicCounts.set(x.topic,(topicCounts.get(x.topic)||0)+1);
+const topicCounts=new Map();for(const x of curItems)if(x.topic)topicCounts.set(x.topic,(topicCounts.get(x.topic)||0)+1);
 const topicsLine=topicCounts.size?`\nTopics (reuse one; keep to about 3-6${topicCounts.size>6?`; there are ${topicCounts.size} now, merge related ones with retopic`:''}): ${[...topicCounts].sort((a,b)=>b[1]-a[1]).map(([t,n])=>`${t} ${n}`).join(', ')}`:'';
-const current=`Current goal${scope}: ${state.goal || '(not yet agreed)'}\nWhy (the problem it solves): ${state.why || '(not yet agreed)'}\n${brief || 'No consensus recorded yet.'}${topicsLine}`;
+const current=`Current goal${scope}: ${state.goal || '(not yet agreed)'}\nWhy (the problem it solves): ${state.why || '(not yet agreed)'}\n${brief || 'No consensus recorded yet.'}${earlier}${topicsLine}`;
 // Soft clarify gate: while the goal, the why or "ask first" questions are unsettled, push for questions before building. Never blocks.
-const firsts=state.items.filter(x=>x.first&&x.status==='open');
+const firsts=curItems.filter(x=>x.first&&x.status==='open');
 // After "go", stop nudging about the goal and why; a new ask-first question turns the nudge back on.
 const wentAhead=!!state.go&&!firsts.length;
 const missing=[!wentAhead&&!state.goal&&'goal',!wentAhead&&!state.why&&'why',firsts.length&&`${firsts.length} ask-first question${firsts.length>1?'s':''} open`].filter(Boolean);
@@ -100,6 +107,7 @@ const guidance=`Consensus is enabled for this project. Conversational working ag
 - Give every item a topic with --topic: a broad area of the work (1-2 words, like "Viewer" or "Memory"), not the subject of one decision. Keep a session to about 3-6 topics: always reuse a topic from the "Topics" line when the item fits one even loosely, and start a new topic only when the conversation moves to a clearly different area. When topics have multiplied, merge them with "retopic <old> <new>". Give items marked {no topic} one with the topic command when you touch them.
 - Clarify before building (soft gate): on a vague or open request, think critically and ask before you spend effort guessing. Agree the goal and the why (the problem it solves; set with "why -") first, and ask the 1-3 questions that would most change what you build (e.g. stack, audience, scope), each with your recommendation; record them with add open --first. It is better to ask one sharp question than to build something the user then has to throw away. Do not over-ask: clear, small or easily reversible tasks need no questions. "go" from the user (or GO from the viewer) means proceed on your recommendations; record them as assumed.
 - Link your work to the decisions: before you edit files, run "work <id>" with the agreed item the edits carry out (add the item first if none fits), and run it again when the work moves to another item. File edits are then traced to that item, so the user sees which files each decision touched and spots work that is not based on an agreed decision. Do not build on a REJECTED item; building on an open or assumed one is shown to the user as unconfirmed.
+- One goal per piece of work. When the conversation clearly moves on to different work than the current goal, propose a new goal in one line; only when the user agrees, run "goal --new -" (the earlier goal and its items are kept, and the user can still look at them in the viewer). Use plain "goal -" only to reword the current goal. Agreed and rejected decisions under earlier goals still apply.
 - Keep a gist: 1-3 lines on the overall consensus (the direction, not details), set with "gist -". Update it when the direction changes, not every turn. It is what future sessions in this project will remember; saving is automatic.
 - The user may turn this off; do not override this.
 - Before using the unslop skill, load the consensus skill: it says how to reuse and record the UI direction.`;

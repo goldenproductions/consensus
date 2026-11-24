@@ -23,7 +23,7 @@ Usage: node brain.mjs [--project <dir>] [--no-mesh] [--once [--size WxH]]
   --once           print one frame and exit (for testing); --size sets its size
 
 Keys: ↑↓ select an item, then a agree · o open · x remove (twice)
-      tab next consensus · p pin/follow · m mesh · ? what the colours mean · q quit`;
+      < > earlier/later goal · tab next consensus · p pin/follow · m mesh · ? what the colours mean · q quit`;
 
 const opt = {project: null, mesh: true, once: false, size: [100, 36], help: false, select: 0};
 const argv = process.argv.slice(2);
@@ -35,6 +35,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--once') opt.once = true;
   else if (a === '--topic') opt.topic = argv[++i] || ''; // --once tests: open this topic
   else if (a === '--offset') opt.offset = +argv[++i] || 0; // --once tests: start further back
+  else if (a === '--goal') opt.goal = +argv[++i] || 0; // --once tests: look at the n-th goal (1 = oldest)
   else if (a === '--select') opt.select = +argv[++i] || 0; // --once tests: preselect the n-th item
   else if (a === '--show-help') opt.help = true; // start with the ? overlay open (also for --once tests)
   else if (a === '--size') { const m = /^(\d+)x(\d+)$/.exec(argv[++i] || ''); if (m) opt.size = [+m[1], +m[2]]; }
@@ -133,12 +134,31 @@ function load(pick, now) {
     // done: null while the work is open, else its note ('' when none was given)
     const done = it.done ? String(it.done.note || '') : null;
     if (n.status !== undefined && (n.status !== status || n.text !== text || n.removed !== null || n.done !== done || (it.notes || []).length !== (n.notes || []).length)) { n.changed = now; model.arrival = now; }
-    Object.assign(n, {status, text, done, order: i, removed: null, time: Number(it.updated || it.at) || 0, notes: Array.isArray(it.notes) ? it.notes : [], topic: String(it.topic || '').trim(), ask: !!it.first && status === 'open'});
+    Object.assign(n, {status, text, done, goal: String(it.goal || ''), order: i, removed: null, time: Number(it.updated || it.at) || 0, notes: Array.isArray(it.notes) ? it.notes : [], topic: String(it.topic || '').trim(), ask: !!it.first && status === 'open'});
   });
   for (const n of model.nodes.values()) if (!seen.has(n.id) && n.removed === null) n.removed = now;
+  // goals, oldest first; the last one is the current goal. A new goal id = the work moved on: the old goal
+  // neuron moves aside into the chain and a new one is born in the centre.
+  const gid = String(st.goalId || '');
+  model.goals = [...(Array.isArray(st.goals) ? st.goals : []).map(g => ({id: String(g.id), goal: String(g.goal || ''), why: String(g.why || '')})),
+    {id: gid, goal: String(st.goal || ''), why: String(st.why || ''), current: true}];
+  if (!model.first && gid !== model.goalId && model.goals.length > 1) { model.goalSpawn = now; model.view = null; model.segManual = false; model.offset = 0; model.pages = []; model.sel = null; }
+  model.goalId = gid;
   const goal = String(st.goal || '');
   if (goal !== model.goal && !model.first) model.goalChanged = now;
   model.goal = goal; model.first = false;
+}
+// The goal being looked at: model.view is an index into model.goals, null = the current goal.
+function viewedGoal() { const gs = model.goals || []; return gs[model.view ?? gs.length - 1] || {id: '', goal: model.goal, why: '', current: true}; }
+const inGoal = (n, g) => g.current ? (!n.goal || n.goal === g.id) : n.goal === g.id;
+function switchGoal(d) {
+  const gs = model.goals || [];
+  if (gs.length < 2) return say('one goal so far: a new goal starts when the work moves on', C.dim);
+  const i = model.view ?? gs.length - 1, j = clamp(i + d, 0, gs.length - 1);
+  if (j === i) return;
+  model.view = j === gs.length - 1 ? null : j;
+  model.segManual = false; model.offset = 0; model.pages = []; model.sel = null;
+  say(model.view === null ? '◉ current goal' : `◎ earlier goal ${j + 1} of ${gs.length} · its agreed and rejected decisions still apply`, C.goal);
 }
 // A session state (home folder) takes its on/off switch from the folder's own state, like the plugin does.
 function folderEnabled(st) {
@@ -247,6 +267,7 @@ const HELP = [ // what each status means for you and Claude, not how it is drawn
   ['○', C.assumed, 'assumed', "Claude's own interpretation, not confirmed by you. Agree it, or correct Claude."],
   ['✓', C.agreed, 'done', 'The work for it is finished; the line under it says how (e.g. merged in PR #16). Shown dimmed so open work stands out.'],
   ['◉', C.goal, 'goal', 'What the work is for. ◌ means no goal is agreed yet.'],
+  ['◎', C.goal, 'earlier goal', 'Each goal is its own neuron, linked in a chain at the bottom. When the work moves on, a new goal starts and the old one keeps its items: < > opens them. Its agreed and rejected decisions still steer the AI.'],
   ['?', C.open, 'ask first', 'A question to settle before anything gets built. Answer it (n, then a), or press G to let the AI go with its recommendations.'],
   ['⌁', KIND.edit, 'files', 'Files the AI changed for a decision (shown under the selected item). △ unconfirmed: work on an item you haven\'t agreed. ✕ drift: work on something you rejected. ⌁ unlinked: edits not tied to any item.'],
   ['', C.dim, 'why', 'The problem the work solves. Until the goal and the why are agreed, the AI asks before it builds.'],
@@ -274,7 +295,7 @@ function drawHelp(S, W, H) {
     else { rows.push({kind: 'item', g, col, name, text: ''}); wrap(desc, descW).forEach(l => rows.push({kind: 'item', text: l})); }
   }
   rows.push({kind: 'plain', text: ''});
-  for (const l of wrap('↵ next that needs you · G go: skip the ask-first questions · W auto-wake on/off · ↑↓ select, then a agree · d disagree · o open · n note · x x forget it · ←→ topic · pgup/pgdn page · g newest topic · tab next consensus · p pin · m mesh · ? / esc close · q quit', boxW - 4)) rows.push({kind: 'plain', text: l});
+  for (const l of wrap('↵ next that needs you · G go: skip the ask-first questions · W auto-wake on/off · ↑↓ select, then a agree · d disagree · o open · n note · x x forget it · ←→ topic · < > earlier/later goal · pgup/pgdn page · g current goal, newest topic · tab next consensus · p pin · m mesh · ? / esc close · q quit', boxW - 4)) rows.push({kind: 'plain', text: l});
   const boxH = Math.min(H - 2, rows.length + 3), x0 = Math.max(0, Math.floor((W - boxW) / 2)), y0 = Math.max(0, Math.floor((H - boxH) / 2));
   const border = C.dim, blank = ' '.repeat(Math.max(0, boxW - 2));
   S.text(x0, y0, '╭' + '─'.repeat(boxW - 2) + '╮', border);
@@ -307,7 +328,8 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   // nodes in display order: agreed, open, assumed; ghosts (removed) fade where they were
   for (const n of [...model.nodes.values()]) if (n.removed !== null && now - n.removed > 1600) model.nodes.delete(n.id);
   // newest first: last created or changed (timestamps from the state script), else creation order
-  const alive = [...model.nodes.values()].filter(n => n.removed === null).sort((a, b) => (b.time - a.time) || (b.order - a.order));
+  const vg = viewedGoal(), earlierView = !vg.current, vgoal = vg.current ? model.goal : vg.goal;
+  const alive = [...model.nodes.values()].filter(n => n.removed === null && inGoal(n, vg)).sort((a, b) => (b.time - a.time) || (b.order - a.order));
   const ghosts = [...model.nodes.values()].filter(n => n.removed !== null);
   alive.forEach((n, i) => { n.idx = i + 1; n.rank = i; });
   // focus: the two newest items at full strength, older ones fade step by step
@@ -354,18 +376,20 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   } else if (avail >= 2) S.text(1, y, '◉', tone(C.goal), true);
   y++;
   const goalFresh = now - model.goalChanged < FRESH_MS;
-  const goalLines = model.goal ? wrap(model.goal, W - 8).slice(0, 2) : ['not agreed yet'];
+  // an earlier goal is labelled "was" and drawn quieter, so it never reads as what the AI works on now
+  const goalLines = vgoal ? wrap(vgoal, W - 8).slice(0, 2) : [earlierView ? '(no goal was set)' : 'not agreed yet'];
   goalLines.forEach((l, i) => {
-    if (i === 0) S.text(1, y, 'goal', tone(C.dim));
-    S.text(7, y, i === 1 && wrap(model.goal, W - 8).length > 2 ? truncate(l + ' …', W - 8) : l, model.goal ? tone(goalFresh ? C.spark : C.goal) : tone(C.dim), !!model.goal);
+    if (i === 0) S.text(1, y, earlierView ? 'was' : 'goal', tone(earlierView ? C.open : C.dim));
+    S.text(7, y, i === 1 && wrap(vgoal, W - 8).length > 2 ? truncate(l + ' …', W - 8) : l, vgoal ? tone(earlierView ? mix(C.goal, C.dim, 0.35) : goalFresh ? C.spark : C.goal) : tone(C.dim), !!vgoal && !earlierView);
     y++;
   });
   // the why: the problem it solves. Missing while a goal exists = the AI should ask before building.
-  if (st && (st.why || model.goal)) {
-    const wl = st.why ? wrap(String(st.why), W - 8) : ['not agreed yet: the AI asks before it builds'];
+  const vwhy = earlierView ? vg.why : String(st?.why || '');
+  if (st && (vwhy || (vgoal && !earlierView))) {
+    const wl = vwhy ? wrap(vwhy, W - 8) : ['not agreed yet: the AI asks before it builds'];
     wl.slice(0, 2).forEach((l, i) => {
       if (i === 0) S.text(1, y, 'why', tone(C.dim));
-      S.text(7, y, i === 1 && wl.length > 2 ? truncate(l + ' …', W - 8) : l, st.why ? tone(mix(C.text, C.goal, 0.3)) : tone(mix(C.open, C.dim, 0.35)), false);
+      S.text(7, y, i === 1 && wl.length > 2 ? truncate(l + ' …', W - 8) : l, vwhy ? tone(mix(C.text, C.goal, 0.3)) : tone(mix(C.open, C.dim, 0.35)), false);
       y++;
     });
   }
@@ -409,8 +433,9 @@ function frame(now, W, H, color = true, rowPrefix = null) {
     S.text(1 + [...tag].length, hintRow, truncate(hint, W - 2 - [...tag].length), C.goal, true);
   }
   else S.text(1, hintRow, hint, model.sel ? C.goal : tone(C.dim, 0.7), !!model.sel);
-  const mode = (model.input ? 'enter save · esc cancel' : model.segManual ? 'g newest topic' : model.pinned ? 'pinned' : W >= 56 ? 'following newest' : 'follow') + (!model.input && W >= 72 && !autoWake() ? ' · wake off' : '');
-  if (!model.input || W >= 60) S.text(W - mode.length - 1, hintRow, mode, tone(model.input ? C.open : model.pinned ? C.open : C.dim, 0.8));
+  const gs = model.goals || [], gIdx = model.view ?? gs.length - 1;
+  const mode = (model.input ? 'enter save · esc cancel' : earlierView ? (W >= 56 ? `earlier goal ${gIdx + 1}/${gs.length} · > newer` : `goal ${gIdx + 1}/${gs.length}`) : model.segManual ? 'g newest topic' : model.pinned ? 'pinned' : W >= 56 ? 'following newest' : 'follow') + (!model.input && !earlierView && gs.length > 1 && W >= 72 ? ' · < earlier goals' : '') + (!model.input && W >= 72 && !autoWake() ? ' · wake off' : '');
+  if (!model.input || W >= 60) S.text(W - mode.length - 1, hintRow, mode, tone(model.input || earlierView ? C.open : model.pinned ? C.open : C.dim, 0.8));
   S.gy = y; S.gh = Math.max(0, hintRow - y);
   if (S.gh < 3) return S.render(color, rowPrefix);
 
@@ -593,14 +618,39 @@ function frame(now, W, H, color = true, rowPrefix = null) {
       for (let k = 0; k < 3; k++) { const p = (da - 600 - k * 450) / 1500; if (p >= 0 && p < 1) S.ring(x, yy, 3 + 22 * easeOut(p), mix(C[n.status], C.spark, 0.6), 1 - p); }
     }
   }
+  // the goal chain: every goal is its own neuron, oldest on the left, linked in the order they came.
+  // The goal you are looking at is the big neuron in the centre; its place in the chain is ringed.
+  const chainN = gs.length, sp = 8;
+  const leftEdge = two ? nodeCol.left * 2 + 6 : 3;
+  const fitN = Math.max(2, Math.floor((cx - leftEdge) / sp) + 1), firstShown = Math.max(0, Math.min(gIdx, chainN - fitN));
+  const chainY = PH - 3, chainX = i => cx - (Math.min(chainN, firstShown + fitN) - 1 - i) * sp;
+  const spawnP = model.goalSpawn ? clamp((now - model.goalSpawn) / 1400, 0, 1) : 1;
+  if (chainN > 1 && S.gh >= 8) {
+    const last = Math.min(chainN, firstShown + fitN);
+    for (let i = firstShown; i < last; i++) {
+      const x = chainX(i), isView = i === gIdx, isCur = i === chainN - 1;
+      if (i > firstShown) S.line(chainX(i - 1), chainY, x, chainY, tone(C.goal), glow(0, 0.3), 2);
+      if (i === chainN - 2 && spawnP < 1) continue; // the goal that just ended is still travelling here
+      S.ring(x, chainY, isView ? 2.5 : 1.5, tone(isCur ? C.goal : mix(C.goal, C.dim, 0.4)), glow(0, isView ? 0.9 : 0.5));
+      S.dot(x, chainY, tone(C.goal), isView ? 1 : 0.6);
+    }
+    if (firstShown > 0) S.line(chainX(firstShown) - 6, chainY, chainX(firstShown) - 2, chainY, tone(C.dim), glow(0, 0.5), 2);
+    // a faint stalk from the chain up to the big neuron: which goal is open
+    if (gIdx >= firstShown && gIdx < last) S.line(chainX(gIdx), chainY - 3, cx, cy + 10, tone(C.goal), glow(0, 0.18), 3);
+    // new goal: the old neuron shrinks and drifts into the chain, the new one grows in the centre
+    if (spawnP < 1 && chainN - 2 >= firstShown) {
+      const e = easeOut(spawnP), ox = cx + (chainX(chainN - 2) - cx) * e, oy = cy + (chainY - cy) * e;
+      for (let rr = 1; rr <= 3; rr++) S.ring(ox, oy, rr * (1 - 0.5 * e), tone(C.goal), glow(0, 0.8));
+    }
+  }
   // the goal neuron
-  const gk = model.goal ? 1 : 0.4;
-  for (let rr = 1; rr <= 3; rr++) S.ring(cx, cy, rr, tone(C.goal), glow(0, 0.75 * gk));
-  S.ring(cx, cy, 5 + Math.sin(t * (busy ? 5 : 1.6)) * (busy ? 1.4 : 0.8), tone(waitingP ? C.open : C.goal), glow(0, (busy || waitingP ? 0.8 : 0.55) * gk));
-  S.ring(cx, cy, 9 + Math.sin(t * 1.1 + 1) * 1.2, tone(C.goal), glow(0, 0.2 * gk), 2);
+  const gk = (vgoal ? 1 : 0.4) * (earlierView ? 0.7 : 1), grow = spawnP < 1 ? easeOut(spawnP) : 1;
+  for (let rr = 1; rr <= 3; rr++) S.ring(cx, cy, rr * grow, tone(C.goal), glow(0, 0.75 * gk));
+  S.ring(cx, cy, (5 + Math.sin(t * (busy ? 5 : 1.6)) * (busy ? 1.4 : 0.8)) * grow, tone(waitingP ? C.open : C.goal), glow(0, (busy || waitingP ? 0.8 : 0.55) * gk));
+  S.ring(cx, cy, (9 + Math.sin(t * 1.1 + 1) * 1.2) * grow, tone(C.goal), glow(0, 0.2 * gk), 2);
   if (waitingP && !off) for (let k = 0; k < 2; k++) { const p = ((t + k * 0.7) % 1.4) / 1.4; S.ring(cx, cy, 4 + 16 * easeOut(p), C.open, 0.9 * (1 - p)); } // amber beacon: Claude needs you
   if (goalFresh) { const p = clamp((now - model.goalChanged) / 1800, 0, 1); if (p < 1) S.ring(cx, cy, 6 + 20 * easeOut(p), C.spark, 1 - p); }
-  S.text(Math.floor(cx / 2), S.gy + Math.floor(cy / 4), model.goal ? '◉' : '◌', tone(C.goal, gk), true);
+  S.text(Math.floor(cx / 2), S.gy + Math.floor(cy / 4), earlierView ? '◎' : vgoal ? '◉' : '◌', tone(C.goal, gk), true);
 
   // nodes and their full text
   for (const n of ghosts) if (n.last) {
@@ -774,6 +824,7 @@ if (opt.once) {
   const [W, H] = opt.size, now = Date.now();
   poll(now - 20000);
   if (opt.offset) model.offset = opt.offset;
+  if (opt.goal && model.goals && opt.goal < model.goals.length) model.view = opt.goal - 1;
   if (opt.topic) { model.openSeg = opt.topic; model.segManual = true; }
   for (let i = 0; i < 40; i++) frame(now - 4000 + i * 100, W, H); // settle angles
   if (opt.select) model.sel = model.order[opt.select - 1] || null;
@@ -828,7 +879,9 @@ if (process.stdin.isTTY) {
     else if (k === '\x1b[D' || k === 'h') switchTopic(-1);  // ← newer topic
     else if (k === '\x1b[6~' || k === ']') { if (model.offset + model.pageCount < model.order.length) { model.pages.push(model.offset); model.offset += model.pageCount; model.sel = null; } }
     else if (k === '\x1b[5~' || k === '[') { if (model.offset > 0) { model.offset = model.pages.length ? model.pages.pop() : Math.max(0, model.offset - Math.max(1, model.pageCount)); model.sel = null; } }
-    else if (k === 'g' || k === '\x1b[H' || k === '\x1b[1~') { model.segManual = false; model.offset = 0; model.pages = []; model.sel = null; }
+    else if (k === '<' || k === ',') switchGoal(-1);  // earlier goal
+    else if (k === '>' || k === '.') switchGoal(1);   // later goal
+    else if (k === 'g' || k === '\x1b[H' || k === '\x1b[1~') { model.view = null; model.segManual = false; model.offset = 0; model.pages = []; model.sel = null; }
     else if (model.sel && k === 'a') act('agreed');
     else if (model.sel && k === 'o') act('open');
     else if (model.sel && k === 'x') act('remove');

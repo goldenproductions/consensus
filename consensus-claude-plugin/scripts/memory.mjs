@@ -43,6 +43,7 @@ function compact(st, session) {
     end: Date.now(),
     goal: st.goal || '',
     why: st.why || '',
+    earlier: (st.goals || []).map(g => g.goal).filter(Boolean), // goals this session had before its last one
     gist: (st.gist || '').replace(/\s*\n\s*/g, ' '),
     decisions: [...pick('agreed'), ...pick('rejected'), ...pick('open').slice(-MAX_OPEN)].map(decision),
   };
@@ -92,6 +93,7 @@ export function renderMemory(project, currentSession = '') {
   const out = eps.slice(0, SHOWN).map((e, i) => {
     let s = `- ${day(e.end)} · ${e.goal || '(no goal agreed)'}`;
     if (e.why) s += `\n  why: ${e.why}`;
+    if (e.earlier?.length) s += `\n  earlier goals in that session: ${e.earlier.join(' · ')}`;
     if (e.gist) s += `\n  gist: ${e.gist.replace(/\s*\n\s*/g, ' ')}`;
     if (i < FULL) {
       for (const d of e.decisions) s += `\n  ${d.status.toUpperCase()}${d.done ? ` (done${d.done === true ? '' : `: ${d.done}`})` : ''}${d.topic ? ` {${d.topic}}` : ''}: ${d.text}${d.notes.length ? ` (user note: ${d.notes.join('; ')})` : ''}`;

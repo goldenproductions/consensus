@@ -56,7 +56,8 @@ export function save(state, cwd=process.cwd(), session='') {
   fs.renameSync(tmp,file);
 }
 export function summary(state) {
-  return `Consensus: ${state.enabled ? 'ON' : 'OFF'}\nGoal: ${state.goal || '(not yet agreed)'}\nWhy: ${state.why || '(not yet agreed)'}\n${state.items.length ? state.items.map((x,i)=>`${i+1}. [${x.status}${x.first ? ', ask first' : ''}${x.done ? ', done' : ''}] ${x.text}${x.done?.note ? ` (done: ${x.done.note})` : ''}`).join('\n') : 'No consensus items yet.'}`;
+  const cur = state.items.filter(x => isCurrent(state, x)), earlier = state.goals || [];
+  return `Consensus: ${state.enabled ? 'ON' : 'OFF'}\nGoal: ${state.goal || '(not yet agreed)'}\nWhy: ${state.why || '(not yet agreed)'}\n${cur.length ? cur.map((x,i)=>`${i+1}. [${x.status}${x.first ? ', ask first' : ''}${x.done ? ', done' : ''}] ${x.text}${x.done?.note ? ` (done: ${x.done.note})` : ''}`).join('\n') : 'No consensus items yet.'}${earlier.length ? `\nEarlier goals: ${earlier.map(g => `"${g.goal || '(none)'}" (${state.items.filter(x => x.goal === g.id).length} items)`).join(', ')}` : ''}`;
 }
 function fail(message){console.error(message);process.exit(1)}
 // Text is the remaining args joined, or stdin when the only arg is "-".
@@ -73,6 +74,22 @@ export function readSeen(project, session) { try { return JSON.parse(fs.readFile
 export function markSeen(project, session, at = Date.now()) {
   try { const f = seenFile(project, session); fs.mkdirSync(path.dirname(f), {recursive: true, mode: 0o700}); fs.writeFileSync(f, JSON.stringify({at}), {mode: 0o600}); } catch {}
 }
+// Goals: the current goal is state.goal/why (id state.goalId); earlier goals are filed in state.goals, oldest first.
+// Each item carries the id of the goal it was made under; an item without one belongs to the current goal.
+export const isCurrent = (state, x) => !x.goal || x.goal === state.goalId;
+// Start a new goal: file the current one (with the items that have no goal yet) and begin an empty one.
+export function newGoal(state, text, now = Date.now()) {
+  const hadGoal = !!(state.goal || state.items.length);
+  if (hadGoal) {
+    const id = state.goalId || crypto.randomUUID();
+    const started = state.goalAt || Math.min(...state.items.map(x => x.at || now), now);
+    state.goals = [...(state.goals || []), {id, goal: state.goal || '', ...(state.why ? {why: state.why} : {}), at: started, ended: now}];
+    for (const x of state.items) if (!x.goal) x.goal = id;
+  }
+  state.goalId = crypto.randomUUID(); state.goal = text; state.goalAt = now;
+  delete state.why; delete state.go; delete state.working;
+  return hadGoal;
+}
 // One line per viewer change, as the AI is told about it.
 export function eventLine(e) {
   const id = String(e.id || '').slice(0, 8);
@@ -82,6 +99,7 @@ export function eventLine(e) {
   if (e.action === 'remove') return `- removed [${id}]: ${e.text}`;
   if (e.action === 'done') return `- marked [${id}] done: ${e.text}${e.note ? ` (${e.note})` : ''}`;
   if (e.action === 'undone') return `- marked [${id}] not done, the work is not finished: ${e.text}`;
+  if (e.action === 'goal') return `- started a new goal: ${e.text}${e.was ? ` (the earlier goal "${e.was}" and its decisions are kept)` : ''}`;
   if (e.action === 'add') return `- added as ${String(e.status).toUpperCase()} [${id}]: ${e.text}`;
   return `- [${id}] ${e.was ? e.was + ' → ' : ''}${String(e.status).toUpperCase()}: ${e.text}`;
 }
@@ -115,8 +133,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const log = ev => { state.events = [...(state.events || []), {at: Date.now(), by, ...ev}].slice(-30); };
   if (command==='on' || command==='off') {folder.enabled=command==='on'; save(folder,cwd); console.log(`Consensus ${command.toUpperCase()} for ${cwd}`);}
   else if (command==='status' || !command){console.log(summary({...state,enabled:on}));}
-  else if (command==='goal') {if(!on) fail('Consensus is off.'); const text=textOf(args);if(!text)fail('Usage: goal <text|->');state.goal=text;save(state,cwd,session);console.log('Goal updated.');}
-  else if (command==='add') {if(!on)fail('Consensus is off.');const [status,...words]=args;const text=textOf(words);if(!['agreed','assumed','open','rejected'].includes(status)||!text)fail('Usage: add <agreed|assumed|open|rejected> <text|->');if(state.items.some(x=>x.text.toLowerCase()===text.toLowerCase()))fail('Duplicate item');const now=Date.now(),id=crypto.randomUUID();state.items.push({id,status,text,at:now,updated:now,by,...(topicArg?{topic:topicArg}:{}),...(firstArg&&status==='open'?{first:true}:{})});log({action:'add',id,status,text});save(state,cwd,session);console.log('Item added.');}
+  // goal -: reword the current goal. goal --new -: the work moved on; file the current goal with its items, start a new one.
+  else if (command==='goal') {if(!on) fail('Consensus is off.');const isNew=args.includes('--new');const text=textOf(args.filter(a=>a!=='--new'));if(!text)fail('Usage: goal [--new] <text|->');
+    if(isNew){const was=state.goal||'';const filed=newGoal(state,text);log({action:'goal',text,was});save(state,cwd,session);console.log(filed?`New goal. The earlier goal and its items are kept; its agreed and rejected decisions still apply.`:'Goal set.');}
+    else{state.goal=text;if(!state.goalId){state.goalId=crypto.randomUUID();state.goalAt=Date.now();}save(state,cwd,session);console.log('Goal updated.');}}
+  else if (command==='add') {if(!on)fail('Consensus is off.');const [status,...words]=args;const text=textOf(words);if(!['agreed','assumed','open','rejected'].includes(status)||!text)fail('Usage: add <agreed|assumed|open|rejected> <text|->');if(state.items.some(x=>x.text.toLowerCase()===text.toLowerCase()))fail('Duplicate item');const now=Date.now(),id=crypto.randomUUID();state.items.push({id,status,text,at:now,updated:now,by,...(state.goalId?{goal:state.goalId}:{}),...(topicArg?{topic:topicArg}:{}),...(firstArg&&status==='open'?{first:true}:{})});log({action:'add',id,status,text});save(state,cwd,session);console.log('Item added.');}
   else if (command==='edit') {if(!on)fail('Consensus is off.');const [id,status,...words]=args;const text=textOf(words);if(!id||!['agreed','assumed','open','rejected'].includes(status)||!text)fail('Usage: edit <id> <status> <text|->');const {item,error}=findItem(state,id);if(error)fail(error);const was=item.status;item.status=status;if(!['agreed','assumed'].includes(status))delete item.done;item.text=text;item.updated=Date.now();item.by=by;if(topicArg!==undefined)item.topic=topicArg;if(status!=='open')delete item.first;else if(firstArg)item.first=true;log({action:'edit',id:item.id,status,was,text});save(state,cwd,session);console.log('Item updated.');}
   else if (command==='retopic') {if(!on)fail('Consensus is off.');const from=String(args[0]||'').trim(),to=args.slice(1).join(' ').trim();if(!from||!to)fail('Usage: retopic <old> <new>');const hit=state.items.filter(x=>(x.topic||'').toLowerCase()===from.toLowerCase());if(!hit.length)fail(`No items with topic ${from}`);for(const x of hit)x.topic=to;save(state,cwd,session);console.log(`Moved ${hit.length} item(s) from ${from} to ${to}.`);}
   else if (command==='topic') {if(!on)fail('Consensus is off.');const [id,...words]=args;const text=textOf(words);if(!id||!text)fail('Usage: topic <id> <name|->');const {item,error}=findItem(state,id);if(error)fail(error);item.topic=text;save(state,cwd,session);console.log('Topic set.');}
