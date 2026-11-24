@@ -40,7 +40,7 @@ const hidden=ordered.filter(x=>!shown.includes(x));
 const counts=['agreed','rejected','open','assumed'].map(st=>[st,hidden.filter(x=>x.status===st).length]).filter(([,n])=>n).map(([st,n])=>`${n} ${st}`).join(', ');
 const noteLines=x=>(x.notes||[]).map(n=>`\n    ↳ ${n.by==='user'?'user note':'note'}: ${n.text}`).join('');
 const workingId=state.working?.id;
-const brief=shown.map(x=>`- ${x.status.toUpperCase()}${x.id===workingId?' (you are working on this)':''}${x.first?' (ask first)':''}${x.by==='user'?' (set by the user in the viewer)':''} {${x.topic||'no topic'}} [${x.id.slice(0,8)}]: ${x.text}${noteLines(x)}`).join('\n')
+const brief=shown.map(x=>`- ${x.status.toUpperCase()}${x.done?` (done${x.done.note?`: ${x.done.note}`:''})`:x.id===workingId?' (you are working on this)':''}${x.first?' (ask first)':''}${x.by==='user'?' (set by the user in the viewer)':''} {${x.topic||'no topic'}} [${x.id.slice(0,8)}]: ${x.text}${noteLines(x)}`).join('\n')
   +(hidden.length?`\n- +${hidden.length} more not shown (${counts}); run status-json to see them`:'');
 // Pin the project explicitly so the CLI hits the same state file even if the shell has cd'd elsewhere.
 // Commands in the syntax of the shell the agent actually uses: Codex on Windows runs PowerShell, everything else
@@ -55,7 +55,7 @@ if(shell==='powershell'){
   const env=`$env:CONSENSUS_PROJECT=${q(project)}; ${session?`$env:CONSENSUS_SESSION=${q(session)}; `:''}$OutputEncoding=[Text.Encoding]::UTF8;`;
   const cli=`node ${q(stateCli)}`;
   usage=`State manager, run in PowerShell as: ${env} ${cli} <command>
-Commands: goal - | why - | gist - | add <agreed|assumed|open> --topic "<Topic>" [--first] - | go | work <id> | edit <id> <agreed|assumed|open|rejected> - | topic <id> "<Topic>" | retopic "<Old>" "<New>" | remove <id> | status-json (full state). <id> is the short id in brackets above or the full id.
+Commands: goal - | why - | gist - | add <agreed|assumed|open> --topic "<Topic>" [--first] - | go | work <id> | done <id> - | undone <id> | edit <id> <agreed|assumed|open|rejected> - | topic <id> "<Topic>" | retopic "<Old>" "<New>" | remove <id> | status-json (full state). <id> is the short id in brackets above or the full id.
 "-" reads the text from stdin. Always pipe the text in from a single-quoted here-string (@' on its own line, '@ at the very start of a line) so PowerShell never expands the user's words, e.g.:
 ${env} @'
 <text>
@@ -64,7 +64,7 @@ ${env} @'
   const q=v=>`'${String(v).replace(/'/g,"'\\''")}'`;
   const cli=`CONSENSUS_PROJECT=${q(project)}${session?` CONSENSUS_SESSION=${q(session)}`:''} node ${q(stateCli)}`;
   usage=`State manager, run via Bash as: ${cli} <command>
-Commands: goal - | why - | gist - | add <agreed|assumed|open> --topic "<Topic>" [--first] - | go | work <id> | edit <id> <agreed|assumed|open|rejected> - | topic <id> "<Topic>" | retopic "<Old>" "<New>" | remove <id> | status-json (full state). <id> is the short id in brackets above or the full id.
+Commands: goal - | why - | gist - | add <agreed|assumed|open> --topic "<Topic>" [--first] - | go | work <id> | done <id> - | undone <id> | edit <id> <agreed|assumed|open|rejected> - | topic <id> "<Topic>" | retopic "<Old>" "<New>" | remove <id> | status-json (full state). <id> is the short id in brackets above or the full id.
 "-" reads the text from stdin. Always pass text through a quoted heredoc so the shell never expands the user's words, e.g.:
 ${cli} add agreed - <<'EOF'
 <text>
@@ -92,6 +92,7 @@ const guidance=`Consensus is enabled for this project. Conversational working ag
 - A general yes ("sounds good", "go with your suggestion") agrees only to your main recommendation. Save details the user did not name as assumed, not agreed. Write agreed items and the goal in the user's own words; do not add detail they did not state.
 - Do not perform major coding actions that contradict agreed items without discussing it first.
 - Items are decisions, requirements and open questions only. Do not record status reports or progress ("I have deployed it", "tests pass now") as items. Write each item so it still makes sense later without the chat: name what it is about.
+- When the work for an item is finished (merged, deployed, verified), run "done <id>" with a short note on how (e.g. "merged in PR #16"). Progress belongs there, on the decision it finishes, not in a new item. Do not mark work done that is still waiting on a review, a merge or a test; "undone <id>" if it turns out unfinished.
 - Write item text as the plain decision or question. Never put status words like "Proposed:" or "(not agreed)" in the text: the status already says it, and the user can change the status in the viewer.
 - REJECTED items: the user said no. Do not act on them or propose them again; if you need something in their place, propose an alternative. A user note under it usually says why.
 - "user note" lines under an item are the user's follow-ups or constraints, often a partial agreement: respect them, adjust the item or your plan, and answer any question in them. Keep the item's status unless the user changed it.

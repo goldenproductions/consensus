@@ -129,8 +129,11 @@ function load(pick, now) {
       n = {id: it.id, seed: hash(it.id), a: null, born: model.first ? now - 1000 : now, changed: -1e12, removed: null, arrived: model.first ? -1e12 : now};
       if (!model.first) model.arrival = now;
       model.nodes.set(it.id, n);
-    } else if (n.status !== status || n.text !== text || n.removed !== null || (it.notes || []).length !== (n.notes || []).length) { n.changed = now; model.arrival = now; }
-    Object.assign(n, {status, text, order: i, removed: null, time: Number(it.updated || it.at) || 0, notes: Array.isArray(it.notes) ? it.notes : [], topic: String(it.topic || '').trim(), ask: !!it.first && status === 'open'});
+    }
+    // done: null while the work is open, else its note ('' when none was given)
+    const done = it.done ? String(it.done.note || '') : null;
+    if (n.status !== undefined && (n.status !== status || n.text !== text || n.removed !== null || n.done !== done || (it.notes || []).length !== (n.notes || []).length)) { n.changed = now; model.arrival = now; }
+    Object.assign(n, {status, text, done, order: i, removed: null, time: Number(it.updated || it.at) || 0, notes: Array.isArray(it.notes) ? it.notes : [], topic: String(it.topic || '').trim(), ask: !!it.first && status === 'open'});
   });
   for (const n of model.nodes.values()) if (!seen.has(n.id) && n.removed === null) n.removed = now;
   const goal = String(st.goal || '');
@@ -242,6 +245,7 @@ const HELP = [ // what each status means for you and Claude, not how it is drawn
   ['●', C.agreed, 'agreed', 'You confirmed it. Claude follows it and asks before going against it.'],
   ['◆', C.open, 'open', 'Still to be decided. Neither of you should treat it as settled.'],
   ['○', C.assumed, 'assumed', "Claude's own interpretation, not confirmed by you. Agree it, or correct Claude."],
+  ['✓', C.agreed, 'done', 'The work for it is finished; the line under it says how (e.g. merged in PR #16). Shown dimmed so open work stands out.'],
   ['◉', C.goal, 'goal', 'What the work is for. ◌ means no goal is agreed yet.'],
   ['?', C.open, 'ask first', 'A question to settle before anything gets built. Answer it (n, then a), or press G to let the AI go with its recommendations.'],
   ['⌁', KIND.edit, 'files', 'Files the AI changed for a decision (shown under the selected item). △ unconfirmed: work on an item you haven\'t agreed. ✕ drift: work on something you rejected. ⌁ unlinked: edits not tied to any item.'],
@@ -400,7 +404,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
   }
   else if (model.msg && Date.now() < model.msg.until) S.text(1, hintRow, truncate(model.msg.text, W - 20), model.msg.col, true);
   else if (model.sel && model.nodes.get(model.sel) && W >= 40) {
-    const st2 = model.nodes.get(model.sel).status, tag = `${GLYPH[st2]} ${st2} · `;
+    const st2 = model.nodes.get(model.sel).status, tag = `${GLYPH[st2]} ${st2}${model.nodes.get(model.sel).done !== null ? ' · ✓ done' : ''} · `;
     S.text(1, hintRow, tag, C[st2], true);
     S.text(1 + [...tag].length, hintRow, truncate(hint, W - 2 - [...tag].length), C.goal, true);
   }
@@ -444,7 +448,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
     for (let i = start; i < items.length; i++) {
       const n = items[i], textLines = wrap(n.text, tw);
       const files = model.trace?.items?.[n.id]?.files, showFiles = files && (n.id === model.sel || n.id === model.state?.working?.id || n.status === 'rejected');
-      const noteLines = [].concat(...n.notes.map(nt => wrap('↳ ' + nt.text, tw)));
+      const noteLines = [].concat(...n.notes.map(nt => wrap('↳ ' + nt.text, tw)), n.done !== null ? wrap('✓ ' + (n.done || 'done'), tw) : []);
       const lines = textLines.concat(noteLines, showFiles ? wrap('⌁ ' + fileList(files).join(' · '), tw) : []);
       n.fileFrom = showFiles ? textLines.length + noteLines.length : null;
       n.textLines = textLines.length;
@@ -608,10 +612,12 @@ function frame(now, W, H, color = true, rowPrefix = null) {
     const sel = n.id === model.sel, wave = 0.5 + 0.5 * Math.sin(t * 2.2 + n.seed * 6);
     const pulse = n.status === 'open' ? 0.65 + 0.35 * Math.sin(t * 3 + n.seed * 6) : n.status === 'assumed' ? 0.55 + 0.45 * wave : 1;
     // assumptions waver between ○ and ◌: a thought that isn't confirmed yet
-    const glyph = n.status === 'assumed' && !off && wave < 0.3 ? '◌' : GLYPH[n.status];
-    S.text(c, r, glyph, tone(f ? mix(C[n.status], C.goal, 0.4) : C[n.status], pulse * Math.max(0.55, focus(n))), true);
+    // done: a check in the item's colour, and the text steps back so the open work stands out
+    const isDone = n.done !== null;
+    const glyph = isDone ? '✓' : n.status === 'assumed' && !off && wave < 0.3 ? '◌' : GLYPH[n.status];
+    S.text(c, r, glyph, tone(f ? mix(C[n.status], C.goal, 0.4) : C[n.status], (isDone ? 0.7 : pulse) * Math.max(0.55, focus(n))), true);
     // selected: keep the status colour (so an assumption still reads as one) and breathe toward white
-    const tcol = sel ? mix(C[n.status], C.goal, 0.1 + 0.3 * (0.5 + 0.5 * Math.sin(t * 3))) : tone(f ? mix(C[n.status], C.goal, 0.55) : mix(C[n.status], C.text, 0.55), f ? 1 : 0.95 * focus(n));
+    const tcol = sel ? mix(C[n.status], C.goal, 0.1 + 0.3 * (0.5 + 0.5 * Math.sin(t * 3))) : tone(f ? mix(C[n.status], C.goal, 0.55) : mix(C[n.status], isDone ? C.dim : C.text, 0.55), f ? 1 : (isDone ? 0.7 : 0.95) * focus(n));
     const ncol = tone(mix(C.goal, C.dim, 0.35), Math.max(0.6, focus(n)));
     const da = now - attnT(n), rec = recent(n);
     // recent items pulse between their colour and bright white; the first 0.7s the text types itself in
