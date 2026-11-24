@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {execFileSync} from 'node:child_process';
+import {execFileSync, spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
 const ROOT = process.env.CONSENSUS_HOME || path.join(os.homedir(), '.consensus-harness');
@@ -35,6 +35,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--once') opt.once = true;
   else if (a === '--topic') opt.topic = argv[++i] || ''; // --once tests: open this topic
   else if (a === '--offset') opt.offset = +argv[++i] || 0; // --once tests: start further back
+  else if (a === '--click') (opt.clicks ||= []).push((argv[++i] || '').split(',').map(Number)); // --once tests: click at col,row (1-based)
   else if (a === '--switch-at') opt.switchAt = +argv[++i] || 0; // --once tests: frame this many ms into a goal switch
   else if (a === '--goal') opt.goal = +argv[++i] || 0; // --once tests: look at the n-th goal (1 = oldest)
   else if (a === '--select') opt.select = +argv[++i] || 0; // --once tests: preselect the n-th item
@@ -157,6 +158,11 @@ function switchGoal(d) {
   if (gs.length < 2) return say('one goal so far: a new goal starts when the work moves on', C.dim);
   const i = model.view ?? gs.length - 1, j = clamp(i + d, 0, gs.length - 1);
   if (j === i) return say(d < 0 ? '◎ this is the first goal' : '◉ this is the current goal', C.dim);
+  setGoal(j);
+}
+function setGoal(j) {
+  const gs = model.goals || [], i = model.view ?? gs.length - 1;
+  if (j === i || j < 0 || j >= gs.length) return;
   model.view = j === gs.length - 1 ? null : j;
   model.segManual = false; model.offset = 0; model.pages = []; model.sel = null;
   // the switch animation: a spark runs along the chain from goal i to goal j and into the centre,
@@ -300,7 +306,7 @@ function drawHelp(S, W, H) {
     else { rows.push({kind: 'item', g, col, name, text: ''}); wrap(desc, descW).forEach(l => rows.push({kind: 'item', text: l})); }
   }
   rows.push({kind: 'plain', text: ''});
-  for (const l of wrap('↵ next that needs you · G go: skip the ask-first questions · W auto-wake on/off · ↑↓ select, then a agree · d disagree · o open · n note · x x forget it · ←→ topic · < > earlier/later goal · pgup/pgdn page · g current goal, newest topic · tab next consensus · p pin · m mesh · ? / esc close · q quit', boxW - 4)) rows.push({kind: 'plain', text: l});
+  for (const l of wrap('↵ next that needs you · G go: skip the ask-first questions · W auto-wake on/off · ↑↓ select, then a agree · d disagree · o open · n note · x x forget it · ←→ topic · < > earlier/later goal · pgup/pgdn page · g current goal, newest topic · tab next consensus · p pin · m mesh · ? / esc close · q quit · mouse: click an item, a topic, a goal neuron or a footer action; the wheel moves the selection', boxW - 4)) rows.push({kind: 'plain', text: l});
   const boxH = Math.min(H - 2, rows.length + 3), x0 = Math.max(0, Math.floor((W - boxW) / 2)), y0 = Math.max(0, Math.floor((H - boxH) / 2));
   const border = C.dim, blank = ' '.repeat(Math.max(0, boxW - 2));
   S.text(x0, y0, '╭' + '─'.repeat(boxW - 2) + '╮', border);
@@ -324,6 +330,9 @@ function drawHelp(S, W, H) {
 // ---------- one frame ----------
 function frame(now, W, H, color = true, rowPrefix = null) {
   const t = now / 1000, S = new Screen(W, H), st = model.state, off = !!st && st.enabled === false;
+  // mouse: every clickable thing registers its cells here while it is drawn; a click runs the topmost hit
+  const hits = model.hits = [], hit = (x0, x1, y, fn) => hits.push({x0, x1, y, fn});
+  const keyHits = (x, y, text) => { let at = x; for (const tok of text.split(' · ')) { const key = TOKEN_KEY[tok.split(' ')[0]]; if (key) hit(at, at + [...tok].length, y, () => onKey(key)); at += [...tok].length + 3; } };
   const act = st && !off ? model.act : null, fresh10 = act && Date.now() - act.at < 600000;
   const busy = !!(fresh10 && (act.state === 'working' || act.state === 'thinking')), waitingP = !!(fresh10 && act.state === 'waiting');
   const thinking = busy && act.state === 'thinking', kcol = busy ? KIND[kindOf(act)] || C.spark : C.spark;
@@ -439,11 +448,13 @@ function frame(now, W, H, color = true, rowPrefix = null) {
     const st2 = model.nodes.get(model.sel).status, tag = `${GLYPH[st2]} ${st2}${model.nodes.get(model.sel).done !== null ? ' · ✓ done' : ''} · `;
     S.text(1, hintRow, tag, C[st2], true);
     S.text(1 + [...tag].length, hintRow, truncate(hint, W - 2 - [...tag].length), C.goal, true);
+    keyHits(1 + [...tag].length, hintRow, hint);
   }
-  else S.text(1, hintRow, hint, model.sel ? C.goal : tone(C.dim, 0.7), !!model.sel);
+  else { S.text(1, hintRow, hint, model.sel ? C.goal : tone(C.dim, 0.7), !!model.sel); if (!model.input) keyHits(1, hintRow, hint); }
   const gs = model.goals || [], gIdx = model.view ?? gs.length - 1;
   const mode = (model.input ? 'enter save · esc cancel' : earlierView ? (W >= 56 ? `earlier goal ${gIdx + 1}/${gs.length} · > newer` : `goal ${gIdx + 1}/${gs.length}`) : model.segManual ? 'g newest topic' : model.pinned ? 'pinned' : W >= 56 ? 'following newest' : 'follow') + (!model.input && !earlierView && gs.length > 1 && W >= 72 ? ' · < earlier goals' : '') + (!model.input && W >= 72 && !autoWake() ? ' · wake off' : '');
   if (!model.input || W >= 60) S.text(W - mode.length - 1, hintRow, mode, tone(model.input || earlierView ? C.open : model.pinned ? C.open : C.dim, 0.8));
+  if (!model.input) keyHits(W - mode.length - 1, hintRow, mode);
   S.gy = y; S.gh = Math.max(0, hintRow - y);
   if (S.gh < 3) return S.render(color, rowPrefix);
 
@@ -640,6 +651,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
       const x = chainX(i), isView = i === gIdx, isCur = i === chainN - 1;
       if (i > firstShown) S.line(chainX(i - 1), chainY, x, chainY, tone(C.goal), glow(0, 0.3), 2);
       if (i === chainN - 2 && spawnP < 1) continue; // the goal that just ended is still travelling here
+      hit(Math.floor(x / 2) - 1, Math.floor(x / 2) + 2, S.gy + Math.floor(chainY / 4), () => setGoal(i));
       S.ring(x, chainY, isView ? 2.5 : 1.5, tone(isCur ? C.goal : mix(C.goal, C.dim, 0.4)), glow(0, isView ? 0.9 : 0.5));
       S.dot(x, chainY, tone(C.goal), isView ? 1 : 0.6);
     }
@@ -695,9 +707,11 @@ function frame(now, W, H, color = true, rowPrefix = null) {
     n.lines.forEach((l, i) => {
       const isNote = i >= (n.textLines || n.lines.length), isFile = n.fileFrom != null && i >= n.fileFrom, cp = [...l], shown = budget === Infinity ? l : cp.slice(0, Math.max(0, budget)).join('');
       budget -= cp.length;
+      hit(side === 'left' ? 1 : c + 2, (side === 'left' ? 1 : c + 2) + [...l].length, r + i, () => selectItem(n.id));
       S.text(side === 'left' ? 1 : c + 2, r + i, shown, isFile ? tone(mix(KIND.edit, C.dim, 0.45)) : isNote ? ncol : sel ? tcol : pcol ? tone(pcol) : tcol, !isNote && (f || sel || rec || n.rank === 0));
       if (side === 'right') S.text(c + 1, r + i, ' ', null);
     });
+    hit(c - 1, c + 2, r, () => selectItem(n.id));
     const working = n.id === model.state?.working?.id && busy;
     if (working && !rec) { const tag = '⌁', tx = c - 2; if (tx >= 0) S.text(tx, r, tag, tone(mix(kcol, C.goal, 0.3 + 0.3 * Math.sin(t * 5))), true); }
     else if (n.ask && !rec) { const tag = '?', tx = c - 2; if (tx >= 0) S.text(tx, r, tag, tone(mix(C.open, C.goal, 0.3 + 0.3 * Math.sin(t * 3 + n.seed * 6))), true); }
@@ -721,6 +735,7 @@ function frame(now, W, H, color = true, rowPrefix = null) {
     let x = lx + ltw - cl;
     for (const [st2, g, c] of parts) { const txt = `${g} ${c}`; S.text(x, r, txt, tone(C[st2], k)); x += [...txt].length + 1; }
     S.text(nodeCol.left, r, '◈', isOpen ? C.goal : tone(C.mesh, 1.4 * k), true);
+    hit(lx, nodeCol.left + 2, r, () => openTopic(sg.name));
     if (isOpen) S.text(nodeCol.left + 1, r, '▸', C.goal, true);
   }
   if (vs && settle > 0 && settle < 1 && !off) for (let k = 0; k < 3; k++) { const p = clamp(settle * 1.3 - k * 0.15, 0, 1); if (p > 0 && p < 1) S.ring(cx, cy, 4 + 26 * easeOut(p), mix(C.spark, C.goal, 0.3), 1 - p); }
@@ -767,6 +782,24 @@ function switchTopic(d) {
   if (j === i) return;
   model.openSeg = names[j]; model.segManual = j !== 0; // back on the newest topic = follow new topics again
   model.offset = 0; model.pages = []; model.sel = null;
+}
+// mouse targets
+const TOKEN_KEY = {a: 'a', d: 'd', o: 'o', n: 'n', x: 'x', esc: '\x1b', '↵': '\r', G: 'G', '+': '+', '?': '?', g: 'g', '<': '<', '>': '>'};
+function selectItem(id) { model.sel = model.sel === id ? null : id; }
+function openTopic(name) { model.openSeg = name; model.segManual = name !== model.segNames[0]; model.offset = 0; model.pages = []; model.sel = null; }
+// a click at column x, row y (0-based): the last registered hit under it wins; empty space clears the selection
+function click(x, y) {
+  if (model.input) return;
+  if (opt.help) { opt.help = false; return; }
+  const h = [...(model.hits || [])].reverse().find(h => h.y === y && x >= h.x0 && x < h.x1);
+  if (h) h.fn(); else if (model.sel) model.sel = null;
+}
+// Windows: Node's raw mode reads console events and drops mouse events. Switching the console input to VT mode
+// (ENABLE_VIRTUAL_TERMINAL_INPUT, 0x200) makes the terminal's mouse reports arrive as text, like everywhere else.
+// The mode belongs to the console, so a short-lived helper can set it; Node restores the original mode on exit.
+function winVtInput() {
+  const ps = '$s=\'[DllImport("kernel32.dll")] public static extern System.IntPtr GetStdHandle(int h); [DllImport("kernel32.dll")] public static extern bool GetConsoleMode(System.IntPtr h, out uint m); [DllImport("kernel32.dll")] public static extern bool SetConsoleMode(System.IntPtr h, uint m);\'; $k=Add-Type -MemberDefinition $s -Name K -Namespace ConsensusVt -PassThru; $h=$k::GetStdHandle(-10); $m=0; if ($k::GetConsoleMode($h,[ref]$m)) { [void]$k::SetConsoleMode($h, $m -bor 0x200) }';
+  try { spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], {stdio: ['inherit', 'ignore', 'ignore'], windowsHide: true}).on('error', () => {}); } catch {}
 }
 function say(text, col) { model.msg = {text, col, until: Date.now() + 3500}; }
 // Auto-wake (plugin 0.10+): the plugin hands viewer changes to the AI a few seconds after you make them.
@@ -861,6 +894,7 @@ if (opt.once) {
   if (opt.topic) { model.openSeg = opt.topic; model.segManual = true; }
   for (let i = 0; i < 40; i++) frame(now - 4000 + i * 100, W, H); // settle angles
   if (opt.select) model.sel = model.order[opt.select - 1] || null;
+  for (const [x, y] of opt.clicks || []) { frame(now, W, H, false); click(x - 1, y - 1); for (let i = 0; i < 5; i++) frame(now, W, H, false); }
   console.log(frame(now, W, H, !process.env.NO_COLOR && process.stdout.isTTY).join('\n'));
   process.exit(0);
 }
@@ -869,7 +903,7 @@ const out = process.stdout;
 if (!out.isTTY) { console.error('consensus-brain needs a terminal (or use --once).'); process.exit(1); }
 out.write('\x1b[?1049h\x1b[?25l\x1b[2J');
 if (!opt.bgSet) out.write('\x1b]11;?\x1b\\'); // ask for the background colour; the answer arrives as input
-const restore = () => out.write('\x1b[0m\x1b[?25h\x1b[?1049l');
+const restore = () => out.write('\x1b[?1000l\x1b[?1006l\x1b[0m\x1b[?25h\x1b[?1049l');
 process.on('exit', restore);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => process.exit(0));
 out.on('resize', () => out.write('\x1b[2J'));
@@ -877,11 +911,24 @@ out.on('resize', () => out.write('\x1b[2J'));
 if (process.stdin.isTTY) {
   process.stdin.setRawMode(true);
   process.stdin.resume();
+  out.write('\x1b[?1000h\x1b[?1006h'); // mouse clicks and wheel, SGR encoding
+  if (process.platform === 'win32') winVtInput();
   process.stdin.on('data', d => {
     setImmediate(syncTyping);
     const k = d.toString();
     const bgm = /\x1b\]11;rgb:([0-9a-f]{2})[0-9a-f]*\/([0-9a-f]{2})[0-9a-f]*\/([0-9a-f]{2})/i.exec(k);
     if (bgm) { if (!opt.bgSet) BG = [1, 2, 3].map(j => parseInt(bgm[j], 16)); return; }
+    const mouse = [...k.matchAll(/\x1b\[<(\d+);(\d+);(\d+)([Mm])/g)];
+    if (mouse.length) {
+      // left press: click; wheel (64/65): move the selection; releases and drags are ignored
+      for (const m of mouse) if (m[4] === 'M') { const b = +m[1]; if (b & 64) { if (!model.input) move(b & 1 ? 1 : -1); } else if ((b & 3) === 0 && !(b & 32)) click(+m[2] - 1, +m[3] - 1); }
+      return;
+    }
+    onKey(k);
+  });
+}
+// one key press (also what a click on a footer action sends)
+function onKey(k) {
     if (model.input?.mode === 'status') { // second step of +: agreed or open
       if (k === '\x03') process.exit(0);
       const t = model.input.text;
@@ -930,7 +977,6 @@ if (process.stdin.isTTY) {
       const all = listStates();
       if (all.length) { const i = all.findIndex(s => s.file === model.file); model.pinned = true; load(all[(i + 1) % all.length], Date.now()); }
     }
-  });
 }
 
 let lastPoll = 0;

@@ -63,6 +63,8 @@ Press `↓` to select an item (the first press lands on the first assumption), m
 
 The selected item keeps its status colour and breathes; the footer names its status (`○ assumed · a agree …`).
 
+With the mouse: click an item to select it (again to let go), a topic on the left to open it, or a goal neuron in the chain to switch to that goal. The footer's actions are buttons: click `a agree`, `d disagree`, `↵ next`, `+ add`, `< earlier goals` and so on. The wheel moves the selection, and a click on empty space clears it.
+
 ## Add your own items
 
 Press `+` and type a rule, constraint or question (`enter` continues, `esc` cancels), then choose how to save it: `a` agreed (a decision or rule Claude must follow; `enter` does the same) or `o` open (a question to settle). It lands in the topic you're looking at, marked as yours, and Claude is told about it on your next message, so you don't have to say it in the chat.
